@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "wrath"
+display_name = "暴怒"
+kind = 1
+text = "造成 3 点伤害。此后，你每次攻击 +1。\n打出后，把它摆在你面前——它不会再离开你。"
+flavor = "滚烫，会呼吸。现在它认你了。"
+permanent = true
+effects = Array[Dictionary]([{
+"op": "deal_damage",
+"amount": 3
+}, {
+"op": "buff_attack_permanent",
+"amount": 1
+}])

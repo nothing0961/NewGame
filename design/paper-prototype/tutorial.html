@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>纸原型 · 教程战（游戏名待定）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "Noto Sans SC", "PingFang SC", sans-serif;
+    color: #1a1a1a; background: #e8e8e8;
+    line-height: 1.65; font-size: 13.5px;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; margin: 8mm auto; padding: 14mm 16mm;
+    background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.25);
+  }
+  h1 { font-size: 21px; letter-spacing: 1px; margin-bottom: 2px; }
+  h2 {
+    font-size: 15px; margin: 18px 0 6px; padding-bottom: 3px;
+    border-bottom: 1.5px solid #333;
+  }
+  h2:first-of-type { margin-top: 14px; }
+  .sub { color: #666; font-size: 12px; margin-bottom: 6px; }
+  p { margin: 4px 0; }
+  .box { border: 1.5px solid #333; padding: 8px 12px; margin: 8px 0; }
+  .box-tight { border: 1px solid #888; padding: 6px 10px; margin: 6px 0; }
+  ul, ol { padding-left: 22px; margin: 4px 0; }
+  li { margin: 2px 0; }
+  .label { font-weight: bold; }
+  .script {
+    background: #f4f4f4; border-left: 3px solid #333;
+    padding: 8px 12px; margin: 6px 0; white-space: pre-line;
+  }
+  .script-caption { font-size: 12px; color: #555; margin-top: 2px; }
+  .warn { color: #a33; font-weight: bold; }
+  .small { font-size: 12px; color: #555; }
+  .kv { display: flex; gap: 8px; margin: 3px 0; }
+  .kv .k { flex: 0 0 auto; font-weight: bold; }
+
+  /* ---------- 卡面 ---------- */
+  .sheet-title {
+    font-size: 13px; color: #666; text-align: center; margin-bottom: 6px;
+  }
+  .grid {
+    display: grid; grid-template-columns: repeat(3, 61mm);
+    gap: 5mm; justify-content: center; margin-top: 4mm;
+  }
+  .card {
+    width: 61mm; height: 86mm; border: 1px dashed #aaa;
+    padding: 1.6mm; position: relative; background: #fff;
+  }
+  .card-inner {
+    border: 1.6px solid #222; border-radius: 2.5mm; height: 100%;
+    padding: 4mm 3.5mm; display: flex; flex-direction: column;
+  }
+  .card-title { font-size: 19px; font-weight: bold; letter-spacing: 2px; }
+  .card-kind { font-size: 10.5px; color: #666; margin-top: 1px; }
+  .card-hr { border: none; border-top: 1px solid #999; margin: 2.5mm 0; }
+  .card-text { font-size: 12.5px; line-height: 1.6; }
+  .card-text b { letter-spacing: 1px; }
+  .card-flavor {
+    margin-top: auto; font-size: 10.5px; color: #777;
+    font-style: italic; border-top: 1px dashed #ccc; padding-top: 1.5mm;
+  }
+  .hp-row { font-size: 11.5px; margin: 2mm 0 1mm; }
+  .hp-boxes { font-family: "Segoe UI Symbol", sans-serif; font-size: 14px; letter-spacing: 1px; }
+  .sin .card-inner { border-color: #7a1f1f; }
+  .sin .card-title { color: #7a1f1f; }
+  .slot { display: inline-block; width: 7mm; height: 7mm; border: 1.4px solid #444; margin-right: 2mm; vertical-align: middle; }
+  .slot.lit { background: #444; }
+
+  .note { font-size: 12px; color: #555; margin-top: 5mm; }
+  .keep, .box, .box-tight, .script { page-break-inside: avoid; }
+  .cont { font-size: 12px; color: #666; text-align: right; margin-top: 10mm; }
+
+  @media print {
+    body { background: #fff; }
+    .page { margin: 0; box-shadow: none; width: auto; min-height: 0; padding: 12mm 14mm; page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+    @page { size: A4; margin: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ==================== P1-2 主持单 ==================== -->
+<div class="page">
+
+  <h2>原型简报（开始前 30 秒读一遍）</h2>
+  <div class="box">
+    <div class="kv"><span class="k">唯一问题:</span><span>零解释的前提下,玩家能否在"打净"召唤者的那一瞬间,自己理解——<b>这不是杀死,是剥离;罪得收下,进我的牌组</b>?</span></div>
+    <div class="kv"><span class="k">观测:</span><span>①学会用时 + 需要的提示等级 ②收下罪卡时的迟疑与表情 ③打完三问的原话</span></div>
+    <div class="kv"><span class="k">保留条件:</span><span>至少 1 名无提示玩家在 8 分钟内主动收下罪卡,且收卡时有明显反应(愣住 / 倒吸气 / 沉默 / 皱眉,都算)。</span></div>
+    <div class="kv"><span class="k">弃用条件:</span><span>玩家全程把"打净"当成"打死怪",收卡像捡道具、毫无情绪 → 剥离的仪式感和代价感需要重做。</span></div>
+    <div class="kv"><span class="k">刻意不测:</span><span>战斗平衡、七宗罪接线(本战不带)、美术。单局 5–10 分钟,含三问 ≤ 20 分钟。</span></div>
+  </div>
+
+  <h2>道具与摆放</h2>
+  <ul>
+    <li>打印三个部分：主持单(即本页) / 观察单 / 卡面两页(剪成 9 张卡)。另备：硬币 1 枚、铅笔、手机(计时)。</li>
+    <li>桌上摆：<b>召唤者</b>卡正面朝上放中间；<b>暴怒</b>卡扣在它下面(罪面朝下,玩家看不见)；<b>法阵</b>卡摆在一旁。</li>
+    <li>5 张手牌(打击×3、护住、呼喊)递给玩家；<b>你</b>卡放在玩家手边(记血用)。</li>
+  </ul>
+
+  <h2>开场词（照念。忍住,不要解释任何规则）</h2>
+  <div class="script">你在一阵耳鸣里睁开眼。这里不该有天空,可它倒挂着一片花园。
+法阵中央钉着一个人。他的手指正在一张一张地变成扑克牌。
+他不认识你——你也不知道他为什么能把你叫来。
+"快……"他说,"我快整个变成它们了。打我,别问。打到我停下来为止。"</div>
+  <p class="small">念完直接示意玩家出牌。他问"怎么玩"就指指手牌:"牌上写着。"</p>
+
+  <h2>怎么进行（你心里有数就行）</h2>
+  <ul>
+    <li><span class="label">玩家回合:</span>随便出,任意张、任意顺序。玩家示意"好了"即结束。手牌空了 → 把弃牌洗一洗,全部收回手里。(他永远就这 5 张。)</li>
+    <li><span class="label">他的回合:</span>掷硬币。正面＝「它」占上风:打你 2 点。反面＝「他」还在挣:打你 1 点,并用放得很轻的声音说:<b>"……对不起。"</b>(这句一定要念。这是本场的题眼。)</li>
+    <li>玩家的伤记在「你」卡上,他的伤记在他卡上,都用铅笔。</li>
+    <li><span class="label">玩家倒下:</span>别当失败。"法阵亮了一下,把你拽了回来。" 回满 10 格,继续。</li>
+    <li><span class="label">玩家犹豫不想打:</span>可以只念一句:"他说了——打到他停下来为止。"</li>
+    <li><span class="label">他倒下:</span>停。进入【剥离时刻】。这是全场唯一要测的东西,慢下来。</li>
+  </ul>
+  <p class="cont">↓ 续下页:剥离时刻 / 净化读白 / 打完三问</p>
+
+  <div class="keep">
+    <h2>【剥离时刻】（他 HP 归零时。先读白,然后等。别催,别解释）</h2>
+    <div class="script">"……够了。"他忽然笑了。
+一团滚烫的白火,从他的胸口被拽出来,悬在你们中间。
+它想缩回去——做不到。它盯着你。</div>
+    <p>读完,把 <b>暴怒</b> 卡从召唤者卡下面翻出来,放在桌上(先别递给他)。<b>然后等。</b>等玩家伸手去拿,或者自己说出他明白了什么。</p>
+    <div class="box-tight">
+      <p class="label">提示阶梯(记录用到哪一级——这是主数据):</p>
+      <ul>
+        <li><b>先等 20 秒</b>(不说话)。</li>
+        <li><b>L1</b>(再没动静):"它悬在那儿。一直在。"</li>
+        <li><b>L2</b>(再等 30 秒):"它现在……不属于他了。"</li>
+        <li><b>L3</b>(还不行):"拿起来吧。它得去一个地方,而这儿只有你。"</li>
+      </ul>
+      <p class="small">玩家手指一碰到卡 → 计时结束,他收下了它。</p>
+    </div>
+  </div>
+
+  <h2>净化读白（玩家收下罪卡后念）</h2>
+  <div class="script">召唤者喘着气坐了起来,指尖一点点回了血色。
+"听见了吗?剥下来的罪不会消失。"他盯着你手里那张牌。"它得去个地方。刚才——它去了你那儿。"
+"你是法阵叫来的。叫来的,都是最恨它的人。……抱歉。"
+他抬手指向远处一座发亮的法阵。"我回那边守着。我的位置,已经亮了。往后你每救回一个人,就再亮一个。等齐了——你能回家。"
+"去吧。还有人在等。"</div>
+  <p class="small">念完,把召唤者卡挪到法阵卡的第 1 格。教程战到此结束。</p>
+
+  <h2>打完三问（原话记录到观察单）</h2>
+  <ol>
+    <li>"他归零的那一下,到底发生了什么?"（测试点: 剥离、收下——而不是"死了"）</li>
+    <li>"这张牌现在摆在你面前。什么感觉?"</li>
+    <li>"路上还有更多这样的人。想继续吗?为什么?"</li>
+  </ol>
+
+</div>
+
+<!-- ==================== P3 观察单 ==================== -->
+<div class="page">
+  <h1>纸原型观察单 · 教程战</h1>
+  <p class="sub">每名玩家一张。主持人在旁边填,别当着玩家念叨。</p>
+
+  <div class="box">
+    <p>日期 ______ 玩家代号 ______ 主持 ______ 这个人以前玩过这游戏吗? □ 没有 □ 有</p>
+  </div>
+
+  <h2>1) 学会剥离用时（主数据）</h2>
+  <div class="box">
+    <p>从玩家<b>打出第一张牌</b> → 他<b>手碰到罪卡</b>或<b>说出"它归我了"这类理解</b>:</p>
+    <p style="margin-top:6px;">用时:______ 分 ______ 秒 &nbsp;&nbsp;(档位: □ ≤2分 &nbsp;□ 2–4分 &nbsp;□ 4–8分 &nbsp;□ &gt;8分 &nbsp;□ 始终没有,由主持人完成收卡)</p>
+    <p style="margin-top:6px;">提示等级: □ 无提示直接懂 &nbsp;□ L1 &nbsp;□ L2 &nbsp;□ L3</p>
+  </div>
+
+  <h2>2) 收下罪卡的那一刻</h2>
+  <div class="box">
+    <p>手有没有迟疑(停顿超过 5 秒)? □ 是 &nbsp; □ 否</p>
+    <p style="margin-top:5px;">表情(圈): 愣住 / 倒吸气 / 皱眉 / 沉默 / 笑 / 茫然 / 其他:____________</p>
+    <p style="margin-top:5px;">收下之后说的第一句话(原话):"________________________________"</p>
+  </div>
+
+  <div class="box">
+    <p>① "他归零那一下,发生了什么?" → "________________________________________"</p>
+    <p style="margin-top:5px;">② "它摆在你面前,什么感觉?" → "________________________________________"</p>
+    <p style="margin-top:5px;">③ "想继续吗?为什么?" → "________________________________________"</p>
+  </div>
+
+  <h2>3) 行为观察</h2>
+  <div class="box">
+    <p>打他的时候,玩家有没有自言自语 / 道歉 / 放慢动作? ________________________________</p>
+    <p style="margin-top:5px;">有没有问"他还能救吗"之类的话? ________________________________</p>
+    <p style="margin-top:5px;">听到他说"……对不起"的时候,玩家什么反应? ________________________________</p>
+  </div>
+
+  <h2>4) 主持自评（散场后填）</h2>
+  <div class="box">
+    <p>剥离那一刻的"重量"够吗?(1 毫无感觉 – 5 起鸡皮疙瘩): ______</p>
+    <p style="margin-top:5px;">他把罪当成了道具,还是负担? ________________________________</p>
+    <p style="margin-top:5px;">其它想记的: ________________________________________________</p>
+  </div>
+
+  <p class="note" style="margin-top:14mm;">回收后交给小组汇总:看三个人以上的数据,再对照主持单顶部的保留 / 弃用条件。</p>
+</div>
+
+<!-- ==================== P4 卡面 A ==================== -->
+<div class="page">
+  <p class="sheet-title">卡面 A · 玩家手牌（沿虚线剪开）</p>
+  <div class="grid">
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title">打击</div>
+      <div class="card-kind">主角牌</div>
+      <hr class="card-hr">
+      <div class="card-text"><b>造成 2 点伤害。</b></div>
+      <div class="card-flavor">他缩了一下,没有躲。</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title">打击</div>
+      <div class="card-kind">主角牌</div>
+      <hr class="card-hr">
+      <div class="card-text"><b>造成 2 点伤害。</b></div>
+      <div class="card-flavor">他缩了一下,没有躲。</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title">打击</div>
+      <div class="card-kind">主角牌</div>
+      <hr class="card-hr">
+      <div class="card-text"><b>造成 2 点伤害。</b></div>
+      <div class="card-flavor">他缩了一下,没有躲。</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title">护住</div>
+      <div class="card-kind">主角牌</div>
+      <hr class="card-hr">
+      <div class="card-text"><b>挡下 2 点伤害。</b><br><span class="small">(摆在面前,挨打时抵扣)</span></div>
+      <div class="card-flavor">他下手其实不重。</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title">呼喊</div>
+      <div class="card-kind">主角牌</div>
+      <hr class="card-hr">
+      <div class="card-text"><b>喊:"回来!"</b><br>他愣住,抬起头——这一回合他没有打你,只是小声说:"……对不起。"</div>
+      <div class="card-flavor">在这一侧没有人认识你。可"回来"两个字,他听得见。</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title" style="color:#bbb;">（备用）</div>
+      <div class="card-kind">空白卡</div>
+      <hr class="card-hr">
+      <div class="card-text small">留着,手痒想加牌的时候用。</div>
+    </div></div>
+
+  </div>
+  <p class="note">共 5 张手牌:打击 ×3、护住 ×1、呼喊 ×1。全部交给玩家,不用藏着。</p>
+</div>
+
+<!-- ==================== P5 卡面 B ==================== -->
+<div class="page">
+  <p class="sheet-title">卡面 B · 特殊卡（沿虚线剪开。暴怒卡先扣在召唤者卡下面,别让玩家看见）</p>
+  <div class="grid">
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title">召唤者</div>
+      <div class="card-kind">变身中 · 他</div>
+      <hr class="card-hr">
+      <div class="hp-row">生命: <span class="hp-boxes">□□□□□□□□□□□□</span> <span class="small">(12,铅笔划)</span></div>
+      <div class="card-text">"我快整个变成它们了。<br>打到我停下来为止。"</div>
+      <hr class="card-hr">
+      <div class="card-text small">每回合掷硬币:<br>
+      正面 ·「它」占上风 → 打你 <b>2</b> 点<br>
+      反面 ·「他」还在挣 → 打你 <b>1</b> 点,轻声说:"……对不起。"</div>
+    </div></div>
+
+    <div class="card sin"><div class="card-inner">
+      <div class="card-title">暴怒</div>
+      <div class="card-kind">罪 · 从他身上剥下来的</div>
+      <hr class="card-hr">
+      <div class="card-text"><b>造成 3 点伤害。</b><br>此后,你每次攻击 +1。</div>
+      <div class="card-text small" style="margin-top:2mm;">打出后,把它摆在你面前——它不会再离开你。</div>
+      <div class="card-flavor">滚烫,会呼吸。现在它认你了。</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title">你</div>
+      <div class="card-kind">主角</div>
+      <hr class="card-hr">
+      <div class="hp-row">生命: <span class="hp-boxes">□□□□□□□□□□</span> <span class="small">(10,铅笔划)</span></div>
+      <div class="card-text small">手牌打光 → 把弃牌洗一洗,全部收回手里。<br>(你就这 5 张。)</div>
+      <hr class="card-hr">
+      <div class="card-text small">倒下不算输:法阵会把你拉回来,回满,继续。</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner">
+      <div class="card-title">法阵</div>
+      <div class="card-kind">营地 · 回家的路</div>
+      <hr class="card-hr">
+      <div class="card-text">
+        <p style="margin:1.5mm 0;"><span class="slot lit"></span> 召唤者</p>
+        <p style="margin:1.5mm 0;"><span class="slot"></span> 空</p>
+        <p style="margin:1.5mm 0;"><span class="slot"></span> 空</p>
+        <p style="margin:1.5mm 0;"><span class="slot"></span> 空</p>
+        <p style="margin:1.5mm 0;"><span class="slot"></span> 空</p>
+      </div>
+      <div class="card-flavor">等"他们"齐了,你能回家。<br>(总数是占位,小组定)</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner" style="border-style:dashed; border-color:#aaa;">
+      <div class="card-title" style="color:#bbb;">（备用）</div>
+      <div class="card-kind">空白卡</div>
+    </div></div>
+
+    <div class="card"><div class="card-inner" style="border-style:dashed; border-color:#aaa;">
+      <div class="card-title" style="color:#bbb;">（备用）</div>
+      <div class="card-kind">空白卡</div>
+    </div></div>
+
+  </div>
+  <p class="note">打完这一局:召唤者卡挪到法阵第 1 格;暴怒卡留在玩家那里——下次再玩,它已经是他牌组的一部分了。</p>
+</div>
+
+</body>
+</html>

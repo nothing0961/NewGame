@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "call"
+display_name = "呼喊"
+kind = 0
+text = "喊：「回来！」\n他愣住，抬起头——这一回合他没有打你，只是小声说：「……对不起。」"
+flavor = "在这一侧没有人认识你。可「回来」两个字，他听得见。"
+permanent = false
+effects = Array[Dictionary]([{
+"op": "suppress_enemy_attack"
+}])
