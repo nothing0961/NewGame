@@ -1,0 +1,208 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/main_flow.gd" id="1_flow"]
+[ext_resource type="Script" path="res://scripts/ui/practice_station.gd" id="2_practice"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_flow")
+
+[node name="BG" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.09, 0.08, 0.12, 1)
+
+[node name="StoryPage" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="StoryText" type="Label" parent="StoryPage"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_left = 0.08
+anchor_top = 0.08
+anchor_right = 0.92
+anchor_bottom = 0.66
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 22
+theme_override_constants/line_spacing = 12
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="StoryButtons" type="HBoxContainer" parent="StoryPage"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -340.0
+offset_top = -150.0
+offset_right = 340.0
+offset_bottom = -90.0
+grow_horizontal = 2
+grow_vertical = 0
+alignment = 1
+theme_override_constants/separation = 24
+
+[node name="PrimaryButton" type="Button" parent="StoryPage/StoryButtons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 52)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "继续"
+
+[node name="SecondaryButton" type="Button" parent="StoryPage/StoryButtons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 52)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "直接去台阶"
+
+[node name="PracticePage" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2_practice")
+
+[node name="TitleLabel" type="Label" parent="PracticePage"]
+layout_mode = 1
+anchor_top = 0.03
+anchor_right = 1.0
+anchor_bottom = 0.13
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 28
+text = "练习站"
+horizontal_alignment = 1
+
+[node name="WarehousePanel" type="PanelContainer" parent="PracticePage"]
+layout_mode = 1
+anchor_left = 0.04
+anchor_top = 0.14
+anchor_right = 0.48
+anchor_bottom = 0.92
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="PracticePage/WarehousePanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="VBox" type="VBoxContainer" parent="PracticePage/WarehousePanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="WarehouseTitle" type="Label" parent="PracticePage/WarehousePanel/MarginContainer/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "仓库（点击加入卡组）"
+
+[node name="WarehouseScroll" type="ScrollContainer" parent="PracticePage/WarehousePanel/MarginContainer/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="WarehouseList" type="VBoxContainer" parent="PracticePage/WarehousePanel/MarginContainer/VBox/WarehouseScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="DeckPanel" type="PanelContainer" parent="PracticePage"]
+layout_mode = 1
+anchor_left = 0.52
+anchor_top = 0.14
+anchor_right = 0.96
+anchor_bottom = 0.92
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="PracticePage/DeckPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="VBox" type="VBoxContainer" parent="PracticePage/DeckPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="DeckTitle" type="Label" parent="PracticePage/DeckPanel/MarginContainer/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "卡组（点击移出）"
+
+[node name="DeckCountLabel" type="Label" parent="PracticePage/DeckPanel/MarginContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "卡组 0 / 8"
+
+[node name="DeckScroll" type="ScrollContainer" parent="PracticePage/DeckPanel/MarginContainer/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="DeckList" type="VBoxContainer" parent="PracticePage/DeckPanel/MarginContainer/VBox/DeckScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="DeckHint" type="Label" parent="PracticePage/DeckPanel/MarginContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 14
+autowrap_mode = 3
+
+[node name="StartPracticeButton" type="Button" parent="PracticePage/DeckPanel/MarginContainer/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+disabled = true
+text = "开始练习"
+
+[node name="LeavePracticeButton" type="Button" parent="PracticePage/DeckPanel/MarginContainer/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "离开练习站"
+
+[node name="BattleHost" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2

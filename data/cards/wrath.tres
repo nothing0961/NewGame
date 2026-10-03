@@ -7,6 +7,7 @@ script = ExtResource("1_card")
 id = "wrath"
 display_name = "暴怒"
 kind = 1
+cost = 6
 text = "造成 3 点伤害。此后，你每次攻击 +1。\n打出后，把它摆在你面前——它不会再离开你。"
 flavor = "滚烫，会呼吸。现在它认你了。"
 permanent = true

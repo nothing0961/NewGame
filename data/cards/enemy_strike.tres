@@ -4,14 +4,14 @@
 
 [resource]
 script = ExtResource("1_card")
-id = "strike"
-display_name = "打击"
+id = "enemy_strike"
+display_name = "打"
 kind = 0
 cost = 1
-text = "造成 2 点伤害。"
-flavor = "她缩了一下，没有躲。"
+text = "造成 1 点伤害。"
+flavor = ""
 permanent = false
 effects = Array[Dictionary]([{
 "op": "deal_damage",
-"amount": 2
+"amount": 1
 }])

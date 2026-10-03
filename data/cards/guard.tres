@@ -7,8 +7,9 @@ script = ExtResource("1_card")
 id = "guard"
 display_name = "护住"
 kind = 0
+cost = 1
 text = "挡下 2 点伤害。\n（摆在面前，挨打时抵扣）"
-flavor = "他下手其实不重。"
+flavor = "她下手其实不重。"
 permanent = false
 effects = Array[Dictionary]([{
 "op": "gain_block",
