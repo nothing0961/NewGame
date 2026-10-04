@@ -492,7 +492,7 @@ func test_commit_batch() -> void:
 			strike_stock += 1
 	check(strike_stock == 5, "五张打击都在牌堆里循环")
 	check(state.collection.is_empty(), "非永久牌不进收藏")
-	check(_count_log(logs, "—— 小默的回合 ——") == 1, "打出后自动进入对方回合")
+	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 1, "打出后自动进入对方回合")
 	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "对方出了 1 张占位牌，打了 1 点")
 	check(state.phase == BattleState.Phase.PLAYER, "回到新的玩家回合")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "新回合 Cost 重置满")
@@ -506,11 +506,11 @@ func test_end_turn_settles_staged() -> void:
 	var state := _make_state(logs)
 	state.debug_force_plays = 0
 	state.stage_card(_find_card(state.hand, "strike"))
-	check(_count_log(logs, "—— 小默的回合 ——") == 0, "还没过回合")
+	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 0, "还没过回合")
 	state.end_turn()
 	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 2, "结束时先结算摆好的打击")
 	check(state.staged.is_empty(), "出牌区清空")
-	check(_count_log(logs, "—— 小默的回合 ——") == 1, "对方回合来过一次")
+	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 1, "对方回合来过一次")
 	check(state.phase == BattleState.Phase.PLAYER, "进入新回合")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "新回合 Cost 重置")
 	check(state.can_stage(state.hand[0]), "新回合可以再摆")
@@ -526,7 +526,7 @@ func test_commit_ends_turn() -> void:
 		guard += 1
 		state.stage_card(0)
 	check(state.commit_staged(), "五张一起打出")
-	check(_count_log(logs, "—— 小默的回合 ——") == 1, "打出后自动过了一次对方回合")
+	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 1, "打出后自动过了一次对方回合")
 	check(state.phase == BattleState.Phase.PLAYER, "回到玩家回合")
 	check(state.hand.size() == BattleConfig.ROUND_GAIN, "打空后过一轮，手里只剩新摸的三张")
 
@@ -638,7 +638,7 @@ func test_enemy_plays_cards() -> void:
 	check(_log_contains(logs, BattleConfig.TEXT_ENEMY_RESISTING), "单张时「她」还在挣的它-她对读")
 	check(state.enemy_hand.size() == 1, "供给见底时能摸几张是几张（只摸回 1 张）")
 	check(state.enemy_discard_pile.is_empty(), "打出的牌被洗回并摸走")
-	check(_log_contains(logs, BattleConfig.TEXT_ROUND_GAIN_ENEMY % ["小默", 1]), "摸牌日志写着只获得 1 张")
+	check(_log_contains(logs, BattleConfig.TEXT_ROUND_GAIN_ENEMY % ["贝尔芬格", 1]), "摸牌日志写着只获得 1 张")
 
 
 func test_round_gain_hand_limit() -> void:
@@ -659,13 +659,13 @@ func test_round_gain_hand_limit() -> void:
 
 
 func test_full_victory_flow() -> void:
-	print("[完整流程：打赢 → 剥离 → 收下 → 三问 → 结束]")
+	print("[完整流程：打赢 → 净化 → 收下 → 三问 → 结束]")
 	var state := _make_state()
 	state.debug_force_plays = 0
 	_fight_until_over(state)
-	check(state.phase == BattleState.Phase.STRIP, "打倒后进入剥离时刻")
+	check(state.phase == BattleState.Phase.STRIP, "打倒后进入净化时刻")
 	check(state.enemy_hp == 0, "她归零了")
-	check(state.collection.is_empty(), "剥离前收藏为空")
+	check(state.collection.is_empty(), "净化前收藏为空")
 	check(state.absorb_wrath(), "拿起暴怒")
 	check(state.collection.size() == 1 and state.collection[0].id == "wrath", "暴怒进收藏")
 	check(_find_card(state.discard_pile, "wrath") == -1, "暴怒不在弃牌堆")
@@ -689,7 +689,7 @@ func test_custom_deck_battle() -> void:
 		ids.append(card.id)
 	ids.sort()
 	check(ids == ["call", "call", "guard", "guard", "guard", "strike", "strike", "strike"], "卡组构成正确")
-	check(state.enemy_name == "小默" and state.enemy_max_hp == BattleConfig.ENEMY_MAX_HP, "教程模式对手是小默")
+	check(state.enemy_name == "贝尔芬格" and state.enemy_max_hp == BattleConfig.ENEMY_MAX_HP, "教程模式对手是贝尔芬格")
 
 
 func test_card_pool() -> void:
@@ -897,7 +897,7 @@ func test_practice_battle() -> void:
 			state.commit_staged()
 		if state.phase == BattleState.Phase.PLAYER:
 			state.end_turn()
-	check(state.phase == BattleState.Phase.ENDED, "打空血量后直接结束（不过剥离）")
+	check(state.phase == BattleState.Phase.ENDED, "打空血量后直接结束（不过净化）")
 	check(_log_contains(logs, BattleConfig.TEXT_PRACTICE_END), "结束读白出现")
 	check(state.collection.is_empty(), "练习没有罪卡")
 	check(not state.absorb_wrath(), "练习结束后也没有拿起环节")
@@ -919,7 +919,7 @@ func test_battle_scene_tutorial() -> void:
 	var timer_label := scene.get_node("%TurnTimerLabel") as Label
 	var overlay := scene.get_node("%Overlay") as Control
 	var story := scene.get_node("%StoryText") as Label
-	check((scene.get_node("%EnemyNameLabel") as Label).text == "小默", "敌人名显示小默")
+	check((scene.get_node("%EnemyNameLabel") as Label).text == "贝尔芬格", "敌人名显示贝尔芬格")
 	var enemy_hand_label := scene.get_node("%EnemyHandLabel") as Label
 	check(enemy_hand_label.visible and enemy_hand_label.text == "手牌 5 张", "敌人手牌张数显示 5 张")
 	check(not overlay.visible, "开局不弹覆盖层（召唤告知已上移到主流程）")
@@ -972,20 +972,20 @@ func test_battle_scene_tutorial() -> void:
 	scene.battle_ended.connect(func(practice: bool) -> void: ended_calls.append(practice))
 	scene.state.debug_force_plays = 0
 	_press_strikes_until_over(scene)
-	check(scene.state.phase == BattleState.Phase.STRIP, "拖拽流程进入剥离时刻")
-	check(overlay.visible, "剥离覆盖层出现")
+	check(scene.state.phase == BattleState.Phase.STRIP, "拖拽流程进入净化时刻")
+	check(overlay.visible, "净化覆盖层出现")
 	var strip_hand_locked := true
 	for child in hand_box.get_children():
 		var card_button := child as CardButton
 		if card_button != null and not card_button.is_queued_for_deletion() and not card_button.disabled:
 			strip_hand_locked = false
-	check(strip_hand_locked, "剥离时刻手牌全部禁用（不可拖拽）")
-	check(story.text.contains("滚烫的白火"), "剥离读白在屏上")
+	check(strip_hand_locked, "净化时刻手牌全部禁用（不可拖拽）")
+	check(story.text.contains("滚烫的白火"), "净化时刻读白在屏上")
 	var absorb_button := scene.get_node("%AbsorbButton") as Button
 	check(absorb_button.visible, "拿起按钮出现")
 	absorb_button.pressed.emit()
 	check(scene.state.phase == BattleState.Phase.DEBRIEF, "收下罪卡进入净化")
-	check(story.text.contains("剥下来的罪"), "净化读白在屏上")
+	check(story.text.contains("净化不会让罪消失"), "净化读白在屏上")
 	var continue_button := scene.get_node("%ContinueButton") as Button
 	continue_button.pressed.emit()
 	check(story.text.contains("归零"), "第一问出现")
@@ -1645,7 +1645,7 @@ func test_main_flow_full() -> void:
 	check(not menu_page.visible, "开场菜单页隐藏")
 	check(story.text.contains("八层"), "召唤告知：世界是八层")
 	check(story.text.contains("清空"), "召唤告知：目标只说清空血量")
-	check(not story.text.contains("剥离") and not story.text.contains("收下"), "告知边界：不提前提剥离/收下")
+	check(not story.text.contains("净化") and not story.text.contains("收下"), "告知边界：不提前提净化/收下")
 	check(not secondary.visible, "开场单按钮")
 	primary.pressed.emit()
 	check(menu_page.visible, "读白后进入入口菜单")
@@ -1657,7 +1657,7 @@ func test_main_flow_full() -> void:
 	menu_continue.pressed.emit()
 	check(story_page.visible and not menu_page.visible, "继续剧情回到读白页")
 	check(story.text.contains("打击") and story.text.contains("护住"), "教学读白在屏上")
-	check(not story.text.contains("剥离"), "教学段也不提剥离")
+	check(not story.text.contains("净化"), "教学段也不提净化")
 	check(secondary.visible, "教学页出现「直接去台阶」")
 	primary.pressed.emit()
 	check(practice_page.visible, "进入练习站")
@@ -1693,19 +1693,19 @@ func test_main_flow_full() -> void:
 	(main.get_node("%LeavePracticeButton") as Button).pressed.emit()
 	check(story_page.visible, "离开练习站后回到读白页")
 	check(story.text.contains("清空"), "转化读白：目标仍是清空血量")
-	check(not story.text.contains("剥离"), "告知边界：转化页也不提剥离")
+	check(not story.text.contains("净化"), "告知边界：转化页也不提净化")
 	primary.pressed.emit()
 	check(battle_host.get_child_count() == 1, "教程战进入战斗位")
 	var battle2: Variant = battle_host.get_child(0)
 	check(battle2.state.mode == BattleState.Mode.TUTORIAL, "是教程模式")
-	check(battle2.state.enemy_name == "小默", "对手是小默")
+	check(battle2.state.enemy_name == "贝尔芬格", "对手是贝尔芬格")
 	_check_cost_label(battle2, "Cost 12 / 12", "教程战 Cost 显示 12/12")
 	check(battle2.state.draw_pile.size() + battle2.state.hand.size() == BattleConfig.DECK_SIZE, "教程战用练习站自组的 8 张卡组")
 	battle2.state.debug_force_plays = 0
 	await process_frame
 	_press_strikes_until_over(battle2)
-	check(battle2.state.phase == BattleState.Phase.STRIP, "打倒小默进入剥离时刻")
-	check((battle2.get_node("%Overlay") as Control).visible, "剥离覆盖层出现")
+	check(battle2.state.phase == BattleState.Phase.STRIP, "打倒贝尔芬格进入净化时刻")
+	check((battle2.get_node("%Overlay") as Control).visible, "净化覆盖层出现")
 	(battle2.get_node("%AbsorbButton") as Button).pressed.emit()
 	check(battle2.state.collection.size() == 1, "罪卡收下")
 	var cont2 := battle2.get_node("%ContinueButton") as Button
@@ -1716,7 +1716,7 @@ func test_main_flow_full() -> void:
 	check(battle2.state.phase == BattleState.Phase.ENDED, "三问走完")
 	await process_frame
 	check(story_page.visible, "回到读白页（结尾）")
-	check(story.text.contains("小默"), "同行结尾读白在屏上")
+	check(story.text.contains("贝尔芬格"), "同行结尾读白在屏上")
 	check(primary.text == "回到入口", "结尾按钮回到入口")
 	primary.pressed.emit()
 	check(menu_page.visible, "结尾读白后回到入口菜单")

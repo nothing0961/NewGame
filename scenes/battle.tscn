@@ -1,22 +1,28 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene format=3 uid="uid://w7jb50j63b5e"]
 
-[ext_resource type="Script" path="res://scripts/ui/battle_screen.gd" id="1_screen"]
+[ext_resource type="Script" uid="uid://ckl2i1ctu4c42" path="res://scripts/ui/battle_screen.gd" id="1_screen"]
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_play_zone"]
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_14cdr"]
+bg_color = Color(0.3529412, 0.101960786, 0.101960786, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_log_box"]
 content_margin_left = 0.0
 content_margin_top = 0.0
 content_margin_right = 0.0
 content_margin_bottom = 0.0
-bg_color = Color(0.13, 0.12, 0.18, 0.7)
+bg_color = Color(0.1, 0.095, 0.14, 0.92)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.35, 0.32, 0.45, 1)
+border_color = Color(0.24, 0.23, 0.32, 1)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_htemk"]
+bg_color = Color(0.9098039, 0.9098039, 0.9098039, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hand_zone"]
 content_margin_left = 0.0
@@ -29,6 +35,22 @@ border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
 border_color = Color(0.32, 0.3, 0.42, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_play_zone"]
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+bg_color = Color(0.13, 0.12, 0.18, 0.7)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.35, 0.32, 0.45, 1)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_right = 8
@@ -50,23 +72,7 @@ corner_radius_top_right = 8
 corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_log_box"]
-content_margin_left = 0.0
-content_margin_top = 0.0
-content_margin_right = 0.0
-content_margin_bottom = 0.0
-bg_color = Color(0.1, 0.095, 0.14, 0.92)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.24, 0.23, 0.32, 1)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
-
-[node name="BattleScreen" type="Control"]
+[node name="BattleScreen" type="Control" unique_id=1691711434]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -75,7 +81,7 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_screen")
 
-[node name="BG" type="ColorRect" parent="."]
+[node name="BG" type="ColorRect" parent="." unique_id=1544152789]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -85,9 +91,10 @@ grow_vertical = 2
 mouse_filter = 2
 color = Color(0.09, 0.08, 0.12, 1)
 
-[node name="EnemyNameLabel" type="Label" parent="."]
+[node name="EnemyNameLabel" type="Label" parent="." unique_id=13485814]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
 offset_left = -240.0
@@ -95,14 +102,14 @@ offset_top = 16.0
 offset_right = 240.0
 offset_bottom = 48.0
 grow_horizontal = 2
-mouse_filter = 2
 theme_override_font_sizes/font_size = 24
-text = "小默"
+text = "贝尔芬格"
 horizontal_alignment = 1
 
-[node name="EnemyHpLabel" type="Label" parent="."]
+[node name="EnemyHpLabel" type="Label" parent="." unique_id=1421748564]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
 offset_left = -240.0
@@ -110,27 +117,37 @@ offset_top = 50.0
 offset_right = 240.0
 offset_bottom = 76.0
 grow_horizontal = 2
-mouse_filter = 2
 theme_override_font_sizes/font_size = 17
 text = "生命 12 / 12"
 horizontal_alignment = 1
 
-[node name="EnemyHandLabel" type="Label" parent="."]
+[node name="ProgressBar2" type="ProgressBar" parent="EnemyHpLabel" unique_id=1467904694]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 0
+offset_left = 150.0
+offset_top = 25.0
+offset_right = 350.0
+offset_bottom = 40.0
+theme_override_styles/background = SubResource("StyleBoxFlat_14cdr")
+value = 100.0
+show_percentage = false
+
+[node name="EnemyHandLabel" type="Label" parent="." unique_id=1207454563]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
 offset_left = -240.0
-offset_top = 80.0
+offset_top = 90.0
 offset_right = 240.0
-offset_bottom = 104.0
+offset_bottom = 114.0
 grow_horizontal = 2
-mouse_filter = 2
 theme_override_font_sizes/font_size = 14
 text = "手牌 5 张"
 horizontal_alignment = 1
 
-[node name="LogBox" type="PanelContainer" parent="."]
+[node name="LogBox" type="PanelContainer" parent="." unique_id=1764469911]
 unique_name_in_owner = true
 layout_mode = 1
 offset_left = 24.0
@@ -140,7 +157,7 @@ offset_bottom = 268.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_log_box")
 
-[node name="MarginContainer" type="MarginContainer" parent="LogBox"]
+[node name="MarginContainer" type="MarginContainer" parent="LogBox" unique_id=1760794776]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -148,58 +165,65 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="LogText" type="RichTextLabel" parent="LogBox/MarginContainer"]
+[node name="LogText" type="RichTextLabel" parent="LogBox/MarginContainer" unique_id=1805930512]
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
 scroll_following = true
 
-[node name="PlayerHpLabel" type="Label" parent="."]
+[node name="PlayerHpLabel" type="Label" parent="." unique_id=575410525]
 unique_name_in_owner = true
 layout_mode = 1
 offset_left = 24.0
-offset_top = 16.0
+offset_top = 10.0
 offset_right = 360.0
-offset_bottom = 44.0
-mouse_filter = 2
+offset_bottom = 38.0
 theme_override_font_sizes/font_size = 19
 text = "你：10 / 10"
 
-[node name="PlayerBlockLabel" type="Label" parent="."]
+[node name="ProgressBar" type="ProgressBar" parent="PlayerHpLabel" unique_id=667917479]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 0
+offset_top = 22.0
+offset_right = 200.0
+offset_bottom = 37.0
+theme_override_styles/background = SubResource("StyleBoxFlat_htemk")
+value = 100.0
+show_percentage = false
+
+[node name="PlayerBlockLabel" type="Label" parent="." unique_id=1529338741]
 unique_name_in_owner = true
 layout_mode = 1
 offset_left = 24.0
 offset_top = 46.0
 offset_right = 360.0
 offset_bottom = 72.0
-mouse_filter = 2
 theme_override_font_sizes/font_size = 16
 text = "护住 0"
 
-[node name="CostLabel" type="Label" parent="."]
+[node name="CostLabel" type="Label" parent="." unique_id=1975271678]
 unique_name_in_owner = true
 layout_mode = 1
 offset_left = 24.0
 offset_top = 74.0
 offset_right = 360.0
 offset_bottom = 102.0
-mouse_filter = 2
 theme_override_font_sizes/font_size = 19
 text = "Cost 12 / 12"
 
-[node name="PileCountLabel" type="Label" parent="."]
+[node name="PileCountLabel" type="Label" parent="." unique_id=868664511]
 unique_name_in_owner = true
 layout_mode = 1
 offset_left = 24.0
 offset_top = 104.0
 offset_right = 400.0
 offset_bottom = 126.0
-mouse_filter = 2
 theme_override_font_sizes/font_size = 14
 text = "牌堆 3　弃牌堆 0"
 
-[node name="HandScroll" type="ScrollContainer" parent="."]
+[node name="HandScroll" type="ScrollContainer" parent="." unique_id=230835221]
 layout_mode = 1
+anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -208,31 +232,31 @@ offset_top = -212.0
 offset_right = -230.0
 offset_bottom = -16.0
 grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_hand_zone")
 horizontal_scroll_mode = 0
 vertical_scroll_mode = 0
-theme_override_styles/panel = SubResource("StyleBoxFlat_hand_zone")
 
-[node name="HandBox" type="Control" parent="HandScroll"]
+[node name="HandBox" type="Control" parent="HandScroll" unique_id=621491161]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 mouse_filter = 2
 
-[node name="HandCountLabel" type="Label" parent="."]
+[node name="HandCountLabel" type="Label" parent="." unique_id=901651335]
 unique_name_in_owner = true
 layout_mode = 1
 offset_left = 34.0
 offset_top = 516.0
 offset_right = 240.0
 offset_bottom = 540.0
-mouse_filter = 2
 theme_override_font_sizes/font_size = 14
 text = "手牌 5/8"
 
-[node name="PlayZoneLabel" type="Label" parent="."]
+[node name="PlayZoneLabel" type="Label" parent="." unique_id=489164013]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 24.0
@@ -240,13 +264,13 @@ offset_top = -402.0
 offset_right = 780.0
 offset_bottom = -378.0
 grow_vertical = 0
-mouse_filter = 2
 theme_override_font_sizes/font_size = 14
 text = "出牌区（手牌拖出松手即摆入；点击已摆的牌可收回）"
 
-[node name="PlayZonePanel" type="PanelContainer" parent="."]
+[node name="PlayZonePanel" type="PanelContainer" parent="." unique_id=185695101]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -258,15 +282,16 @@ grow_vertical = 0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_play_zone")
 
-[node name="PlayBox" type="HBoxContainer" parent="PlayZonePanel"]
+[node name="PlayBox" type="HBoxContainer" parent="PlayZonePanel" unique_id=464119592]
 unique_name_in_owner = true
 layout_mode = 2
-alignment = 1
 theme_override_constants/separation = 12
+alignment = 1
 
-[node name="DiscardZone" type="PanelContainer" parent="."]
+[node name="DiscardZone" type="PanelContainer" parent="." unique_id=1973882420]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
@@ -280,26 +305,26 @@ grow_vertical = 0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_discard_zone")
 
-[node name="Margin" type="MarginContainer" parent="DiscardZone"]
+[node name="Margin" type="MarginContainer" parent="DiscardZone" unique_id=1509851389]
 layout_mode = 2
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
 
-[node name="DiscardZoneLabel" type="Label" parent="DiscardZone/Margin"]
+[node name="DiscardZoneLabel" type="Label" parent="DiscardZone/Margin" unique_id=185041618]
 unique_name_in_owner = true
 layout_mode = 2
-mouse_filter = 2
 theme_override_font_sizes/font_size = 14
 text = "弃牌区"
 horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
 
-[node name="CommitButton" type="Button" parent="."]
+[node name="CommitButton" type="Button" parent="." unique_id=1605958649]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
@@ -311,12 +336,14 @@ offset_bottom = -100.0
 grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 1
+theme_override_colors/font_color = Color(0.9098039, 0.9098039, 0.9098039, 1)
 theme_override_font_sizes/font_size = 18
 text = "打出"
 
-[node name="TurnTimerLabel" type="Label" parent="."]
+[node name="TurnTimerLabel" type="Label" parent="." unique_id=673420646]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
@@ -327,14 +354,14 @@ offset_right = -24.0
 offset_bottom = -158.0
 grow_horizontal = 0
 grow_vertical = 0
-mouse_filter = 2
 theme_override_font_sizes/font_size = 16
 text = "剩余 45 秒"
 horizontal_alignment = 2
 
-[node name="EndTurnButton" type="Button" parent="."]
+[node name="EndTurnButton" type="Button" parent="." unique_id=2062609923]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
@@ -349,10 +376,11 @@ mouse_filter = 1
 theme_override_font_sizes/font_size = 18
 text = "结束回合"
 
-[node name="QuitPracticeButton" type="Button" parent="."]
+[node name="QuitPracticeButton" type="Button" parent="." unique_id=2126065170]
 unique_name_in_owner = true
 visible = false
 layout_mode = 1
+anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -190.0
@@ -364,7 +392,7 @@ mouse_filter = 1
 theme_override_font_sizes/font_size = 18
 text = "结束练习"
 
-[node name="Overlay" type="Control" parent="."]
+[node name="Overlay" type="Control" parent="." unique_id=1946000850]
 unique_name_in_owner = true
 visible = false
 layout_mode = 1
@@ -374,7 +402,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="OverlayDimmer" type="ColorRect" parent="Overlay"]
+[node name="OverlayDimmer" type="ColorRect" parent="Overlay" unique_id=759282631]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -383,25 +411,26 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 0.78)
 
-[node name="StoryText" type="Label" parent="Overlay"]
+[node name="StoryText" type="Label" parent="Overlay" unique_id=1833364046]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = -1
 anchor_left = 0.07
 anchor_top = 0.15
 anchor_right = 0.93
 anchor_bottom = 0.62
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 2
-theme_override_font_sizes/font_size = 21
 theme_override_constants/line_spacing = 10
+theme_override_font_sizes/font_size = 21
 horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
 
-[node name="AbsorbButton" type="Button" parent="Overlay"]
+[node name="AbsorbButton" type="Button" parent="Overlay" unique_id=764404625]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
@@ -415,9 +444,10 @@ grow_vertical = 0
 theme_override_font_sizes/font_size = 19
 text = "拿起 暴怒"
 
-[node name="ContinueButton" type="Button" parent="Overlay"]
+[node name="ContinueButton" type="Button" parent="Overlay" unique_id=1323625580]
 unique_name_in_owner = true
 layout_mode = 1
+anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
@@ -431,10 +461,11 @@ grow_vertical = 0
 theme_override_font_sizes/font_size = 19
 text = "继续"
 
-[node name="DiscardScroll" type="ScrollContainer" parent="Overlay"]
+[node name="DiscardScroll" type="ScrollContainer" parent="Overlay" unique_id=127892918]
 unique_name_in_owner = true
 visible = false
 layout_mode = 1
+anchors_preset = -1
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
@@ -446,7 +477,7 @@ offset_bottom = -60.0
 grow_horizontal = 2
 mouse_filter = 2
 
-[node name="DiscardBox" type="VBoxContainer" parent="Overlay/DiscardScroll"]
+[node name="DiscardBox" type="VBoxContainer" parent="Overlay/DiscardScroll" unique_id=4382617]
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
