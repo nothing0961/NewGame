@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="NewGame"
+config/name="七妄奇迹"
 run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.7")
 config/icon="res://icon.svg"
