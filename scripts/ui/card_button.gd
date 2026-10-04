@@ -11,6 +11,7 @@ var drag_index := -1
 var fan_arranged := false  # 由 BattleScreen._layout_hand 置位：扇形手牌才做悬停抬升
 var fan_base_position := Vector2.ZERO
 var _scale_tween: Tween
+var _base_normal_style: StyleBoxFlat
 
 
 func _ready() -> void:
@@ -58,14 +59,33 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 	return {"zone": drag_zone, "index": drag_index, "card_id": card.id}
 
 
-func _make_style(bg: Color, border: Color) -> StyleBoxFlat:
+# 拖叠目标高亮：正常态描金边框＋置顶（拖拽中悬停信号不触发，需外力设置）
+func set_merge_highlight(on: bool) -> void:
+	if _base_normal_style == null:
+		return
+	if on:
+		var highlighted: StyleBoxFlat = _base_normal_style.duplicate()
+		highlighted.border_color = Color(1.0, 0.87, 0.55)
+		highlighted.set_border_width_all(2)
+		add_theme_stylebox_override("normal", highlighted)
+		z_index = 1
+	else:
+		add_theme_stylebox_override("normal", _base_normal_style)
+		z_index = 0
+
+
+func _make_style(bg: Color, border: Color, corner := 6, border_width := 1) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = bg
 	style.border_color = border
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(6)
+	style.set_border_width_all(border_width)
+	style.set_corner_radius_all(corner)
 	style.set_content_margin_all(8)
 	return style
+
+
+func sin_style(bg: Color, border: Color) -> StyleBoxFlat:
+	return _make_style(bg, border, 12, 2)
 
 
 func setup(card_data: CardData) -> void:
@@ -76,10 +96,24 @@ func setup(card_data: CardData) -> void:
 	size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_theme_font_size_override("font_size", 13)
-	add_theme_stylebox_override("normal", _make_style(Color(0.17, 0.16, 0.22), Color(0.4, 0.37, 0.52)))
-	add_theme_stylebox_override("hover", _make_style(Color(0.22, 0.2, 0.29), Color(0.55, 0.5, 0.72)))
-	add_theme_stylebox_override("pressed", _make_style(Color(0.14, 0.13, 0.19), Color(0.45, 0.4, 0.6)))
-	add_theme_stylebox_override("disabled", _make_style(Color(0.12, 0.115, 0.16), Color(0.25, 0.24, 0.32)))
+	if card.kind == CardData.Kind.SIN:
+		var frame := Color(0.46, 0.21, 0.16)
+		add_theme_stylebox_override("normal", sin_style(Color(0.21, 0.12, 0.11), frame))
+		add_theme_stylebox_override("hover", sin_style(Color(0.27, 0.15, 0.13), frame.lightened(0.2)))
+		add_theme_stylebox_override("pressed", sin_style(Color(0.18, 0.1, 0.09), frame.darkened(0.2)))
+		add_theme_stylebox_override("disabled", sin_style(Color(0.14, 0.1, 0.1), Color(0.3, 0.17, 0.14)))
+	elif card.kind == CardData.Kind.AMPLIFY:
+		var amp_frame := Color(0.22, 0.5, 0.47)
+		add_theme_stylebox_override("normal", _make_style(Color(0.1, 0.19, 0.19), amp_frame))
+		add_theme_stylebox_override("hover", _make_style(Color(0.13, 0.25, 0.24), amp_frame.lightened(0.2)))
+		add_theme_stylebox_override("pressed", _make_style(Color(0.08, 0.16, 0.15), amp_frame.darkened(0.2)))
+		add_theme_stylebox_override("disabled", _make_style(Color(0.09, 0.14, 0.14), Color(0.22, 0.33, 0.32)))
+	else:
+		add_theme_stylebox_override("normal", _make_style(Color(0.17, 0.16, 0.22), Color(0.4, 0.37, 0.52)))
+		add_theme_stylebox_override("hover", _make_style(Color(0.22, 0.2, 0.29), Color(0.55, 0.5, 0.72)))
+		add_theme_stylebox_override("pressed", _make_style(Color(0.14, 0.13, 0.19), Color(0.45, 0.4, 0.6)))
+		add_theme_stylebox_override("disabled", _make_style(Color(0.12, 0.115, 0.16), Color(0.25, 0.24, 0.32)))
+	_base_normal_style = get_theme_stylebox("normal") as StyleBoxFlat
 	add_theme_color_override("font_color", Color(0.9, 0.89, 0.94))
 	add_theme_color_override("font_disabled_color", Color(0.55, 0.54, 0.6))
 	# PASS：不拦截拖放（否则引擎的拖放遍历会在按钮处中断，永远问不到 BattleScreen）

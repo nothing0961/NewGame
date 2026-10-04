@@ -7,7 +7,8 @@ extends RefCounted
 
 const PLAYER_MAX_HP := 10
 const PLAYER_MAX_COST := 12
-const ENEMY_MAX_HP := 12
+# 教程战为短局：玩家打小默时手里还没有罪卡（收下发生在战斗之后），8 回合保底的拉长无意义
+const ENEMY_MAX_HP := 16
 const ENEMY_NAME := "小默"
 const HAND_SIZE := 5
 const HAND_LIMIT := 8
@@ -19,11 +20,20 @@ const DECK_COMPOSITION := {
 	"guard": 2,
 	"call": 1,
 }
+# 仓库初始卡池：三分类（攻击/防御/功能）各强弱两档＋增幅类四张，总量 20 > 卡组 8，组卡为真取舍
 const WAREHOUSE_INITIAL := {
 	"strike": 5,
+	"heavy_strike": 2,
 	"guard": 3,
+	"strong_guard": 2,
 	"call": 2,
+	"shift": 2,
+	"quench": 2,
+	"surge": 1,
+	"bulwark": 1,
 }
+# 堆叠：把一张牌叠到出牌区同类已摆牌上，合成牌费用＝各原牌费用之和＋每多一张收 STACK_FEE
+const STACK_FEE := 1
 # 一轮结束（玩家回合＋敌人回合都结束）后，双方各从各自牌组摸三张；供给不足时能摸几张是几张
 const ROUND_GAIN := 3
 const ENEMY_DECK_COMPOSITION := {
@@ -31,7 +41,17 @@ const ENEMY_DECK_COMPOSITION := {
 }
 
 const PRACTICE_ENEMY_NAME := "木桩"
-const PRACTICE_ENEMY_HP := 30
+const PRACTICE_ENEMY_HP := 48
+
+# 罪卡规则（design/design-round1.md §1）：任务达成或第 SIN_ROUND_FALLBACK 回合保底解锁；每场战斗仅出现并使用一次
+const SIN_CARD_ID := "wrath"
+const SIN_ROUND_FALLBACK := 8
+const SIN_TASK_ATTACK_PLAYS := 3
+const TEXT_SIN_TASK := "本场战斗中累计打出 %d 张攻击牌"
+const TEXT_SIN_PROGRESS := "（%d/%d）"
+const TEXT_SIN_UNLOCKED := "「%s」的封印解开了——它现在可以打出了。"
+const TEXT_SIN_USED := "「%s」已经用过了。这一场，它不会再回来。"
+const TEXT_SIN_BLOCKED := "「%s」被封印着——%s%s，或撑到第 %d 回合，它才会醒。"  # 4 参数：牌名、任务文案、进度、保底回合
 
 const TEXT_INTRO := [
 	"你在一阵耳鸣里睁开眼。这里不该有天空，可它倒挂着一片花园。",

@@ -2,7 +2,7 @@ extends Control
 
 const BATTLE_SCENE := preload("res://scenes/battle.tscn")
 
-enum Page { STORY, PRACTICE, BATTLE }
+enum Page { STORY, MENU, PRACTICE, BATTLE }
 
 @onready var story_page: Control = %StoryPage
 @onready var story_text: Label = %StoryText
@@ -10,24 +10,46 @@ enum Page { STORY, PRACTICE, BATTLE }
 @onready var secondary_button: Button = %SecondaryButton
 @onready var battle_host: Control = %BattleHost
 @onready var practice_page = %PracticePage
+@onready var menu_page: Control = %MenuPage
+@onready var menu_continue_button: Button = %MenuContinueButton
+@onready var menu_practice_button: Button = %MenuPracticeButton
+@onready var menu_restart_button: Button = %MenuRestartButton
 
 var pool := CardPool.new()
 var _primary_action: Callable = Callable()
 var _secondary_action: Callable = Callable()
+var _teach_seen := false
 
 
 func _ready() -> void:
 	practice_page.setup(pool)
 	practice_page.start_practice_requested.connect(_on_practice_start_requested)
 	practice_page.leave_requested.connect(_on_practice_leave_requested)
+	menu_continue_button.pressed.connect(_on_continue_story_pressed)
+	menu_practice_button.pressed.connect(_open_practice)
+	menu_restart_button.pressed.connect(_restart)
 	_show_intro()
 
 
 func _show_intro() -> void:
-	_show_story(BattleConfig.TEXT_INTRO, "继续", _show_teach)
+	_show_story(BattleConfig.TEXT_INTRO, "继续", _show_entry_menu)
+
+
+# 入口页：练习站独立于剧情，随时可进
+func _show_entry_menu() -> void:
+	menu_continue_button.text = "继续剧情" if not _teach_seen else "继续剧情（前往台阶）"
+	_show_page(Page.MENU)
+
+
+func _on_continue_story_pressed() -> void:
+	if _teach_seen:
+		_show_transform()
+	else:
+		_show_teach()
 
 
 func _show_teach() -> void:
+	_teach_seen = true
 	_show_story(BattleConfig.TEXT_TEACH, "去练习站", _open_practice, "直接去台阶", _show_transform)
 
 
@@ -41,7 +63,10 @@ func _on_practice_start_requested() -> void:
 
 
 func _on_practice_leave_requested() -> void:
-	_show_transform()
+	if _teach_seen:
+		_show_transform()
+	else:
+		_show_entry_menu()
 
 
 func _show_transform() -> void:
@@ -56,7 +81,7 @@ func _start_tutorial_battle() -> void:
 
 
 func _show_ending() -> void:
-	_show_story(BattleConfig.TEXT_ENDING, "重新开始", _restart)
+	_show_story(BattleConfig.TEXT_ENDING, "回到入口", _show_entry_menu)
 
 
 func _restart() -> void:
@@ -109,4 +134,5 @@ func _disconnect_button(button: Button, previous: Callable) -> Callable:
 
 func _show_page(page: int) -> void:
 	story_page.visible = page == Page.STORY
+	menu_page.visible = page == Page.MENU
 	practice_page.visible = page == Page.PRACTICE

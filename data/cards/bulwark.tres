@@ -4,14 +4,15 @@
 
 [resource]
 script = ExtResource("1_card")
-id = "guard"
-display_name = "护住"
-kind = 1
+id = "bulwark"
+display_name = "筑壁"
+kind = 5
 cost = 1
-text = "挡下 2 点伤害。"
-flavor = "她下手其实不重。"
+text = "弃掉：获得 3 点格挡。"
+flavor = "放下手里的一件，才腾得出手挡住别的。"
 permanent = false
-effects = Array[Dictionary]([{
+effects = Array[Dictionary]([])
+discard_effects = Array[Dictionary]([{
 "op": "gain_block",
-"amount": 2
+"amount": 3
 }])

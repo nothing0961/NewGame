@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "surge"
+display_name = "蓄能"
+kind = 5
+cost = 1
+text = "弃掉：获得 Cost +3。"
+flavor = "空出来的地方，会有别的东西填上。"
+permanent = false
+effects = Array[Dictionary]([])
+discard_effects = Array[Dictionary]([{
+"op": "gain_cost",
+"amount": 3
+}])

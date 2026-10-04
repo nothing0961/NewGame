@@ -6,7 +6,7 @@
 script = ExtResource("1_card")
 id = "enemy_strike"
 display_name = "打"
-kind = 0
+kind = 3
 cost = 1
 text = "造成 1 点伤害。"
 flavor = ""

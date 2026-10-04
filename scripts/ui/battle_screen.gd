@@ -62,6 +62,7 @@ var _drag_stageable := false
 var _zone_base_styles := {}
 var _zone_hover_styles := {}
 var _zone_droppable_styles := {}
+var _merge_hover: CardButton = null
 var _sfx_players := {}
 
 var _battle_mode := BattleState.Mode.TUTORIAL
@@ -83,13 +84,14 @@ func _ready() -> void:
 	state.card_recalled.connect(_on_card_recalled)
 	state.card_played.connect(_on_card_played)
 	state.card_discarded.connect(_on_card_discarded)
+	state.card_merged.connect(_on_card_merged)
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
 	commit_button.pressed.connect(_on_commit_pressed)
 	absorb_button.pressed.connect(_on_absorb_pressed)
 	continue_button.pressed.connect(_on_continue_pressed)
 	quit_practice_button.pressed.connect(_on_quit_practice_pressed)
 	quit_practice_button.visible = _battle_mode == BattleState.Mode.PRACTICE
-	absorb_button.text = "拿起 %s" % CardDB.get_card("wrath").display_name
+	absorb_button.text = "拿起 %s" % CardDB.get_card(BattleConfig.SIN_CARD_ID).display_name
 	_setup_zone_styles()
 	hand_box.resized.connect(_layout_hand)
 	if _battle_mode == BattleState.Mode.PRACTICE:
@@ -131,6 +133,7 @@ func _notification(what: int) -> void:
 		_drag_zone_source = ""
 		_drag_stageable = false
 		_drag_target_now = ""
+		_update_merge_hover(-1)
 		_refresh_zone_highlight()
 		_update_discard_zone()
 
@@ -145,10 +148,13 @@ func _sync_ui() -> void:
 	enemy_hand_label.text = "手牌 %d 张" % state.enemy_hand.size()
 	enemy_hand_label.visible = state.mode == BattleState.Mode.TUTORIAL
 	player_hp_label.text = "你：%d / %d" % [state.player_hp, BattleConfig.PLAYER_MAX_HP]
-	cost_label.text = "Cost %d / %d" % [state.player_cost, BattleConfig.PLAYER_MAX_COST]
+	# 显示本回合「可用」Cost＝现有 − 出牌区已摆：摆放/收回/弃牌都实时反映
+	cost_label.text = "回合 %d　Cost %d / %d" % [state.turn_count, maxi(0, state.player_cost - state.staged_cost()), BattleConfig.PLAYER_MAX_COST]
 	var block_line := "护住 %d" % state.player_block
 	if state.attack_bonus > 0:
 		block_line += "　攻击 +%d" % state.attack_bonus
+	if state.turn_attack_bonus > 0:
+		block_line += "　本回合攻击 +%d" % state.turn_attack_bonus
 	player_block_label.text = block_line
 	hand_count_label.text = "手牌 %d/%d" % [state.hand.size(), BattleConfig.HAND_LIMIT]
 	if state.hand.size() >= BattleConfig.HAND_LIMIT:
@@ -176,7 +182,12 @@ func _rebuild_hand() -> void:
 		var card: CardData = state.hand[i]
 		var button := CardButton.new()
 		button.setup(card)
-		button.tooltip_text = card.flavor + "\n拖拽：松手自动摆进出牌区；拖到弃牌区＝弃掉换 Cost"
+		if card.kind == CardData.Kind.SIN:
+			button.tooltip_text = card.flavor + "\n" + state.sin_lock_reason()
+		elif card.kind == CardData.Kind.AMPLIFY:
+			button.tooltip_text = card.flavor + "\n这张牌不能打出——拖到弃牌区弃掉，触发它的效果"
+		else:
+			button.tooltip_text = card.flavor + "\n拖拽：松手自动摆进出牌区（放开到同类牌上＝叠上去）；拖到弃牌区＝弃掉换 Cost"
 		if state.phase == BattleState.Phase.PLAYER:
 			button.drag_zone = "hand"
 			button.drag_index = i
@@ -213,6 +224,7 @@ func _layout_hand() -> void:
 
 
 func _rebuild_play_zone() -> void:
+	_merge_hover = null
 	for child in play_box.get_children():
 		child.hide()
 		child.queue_free()
@@ -223,7 +235,10 @@ func _rebuild_play_zone() -> void:
 			var card_button := CardButton.new()
 			card_button.setup(card)
 			card_button.text = "%s\n\n（点击收回）" % card.display_name
-			card_button.tooltip_text = "点击收回，或拖回手牌区"
+			if card.is_merged():
+				card_button.tooltip_text = "点击拆开收回原牌（共 %d 张），或拖回手牌区" % card.parts.size()
+			else:
+				card_button.tooltip_text = "点击收回，或拖回手牌区"
 			card_button.drag_zone = "play"
 			card_button.drag_index = i
 			card_button.disabled = staging_locked
@@ -260,7 +275,8 @@ func _on_staged_pressed(index: int) -> void:
 	state.recall_card(index)
 
 
-# 手牌拖出即视为要打出：除弃牌区外，放手在任何位置都自动摆进出牌区
+# 手牌拖出即视为要打出：除弃牌区外，放手在任何位置都自动摆进出牌区；
+# 放开在同大类已摆牌上＝叠上去（合成一张），放开在不可叠的牌上仍按普通摆放处理
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 	if typeof(data) != TYPE_DICTIONARY:
 		return false
@@ -271,10 +287,12 @@ func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 	var hover := ""
 	if zone == "hand":
 		_drag_stageable = _stageable_from_data(info)
+		var merge_index := _merge_target_at(at_position, info)
+		_update_merge_hover(merge_index)
 		if target == "discard":
 			accepted = true
 			hover = "discard"
-		elif _drag_stageable:
+		elif _drag_stageable or merge_index >= 0:
 			accepted = true
 			hover = "play"
 	elif zone == "play" and target == "hand":
@@ -294,7 +312,11 @@ func _drop_data(at_position: Vector2, data: Variant) -> void:
 		if _drop_target_at(at_position) == "discard":
 			_discard_for_cost(index)
 		else:
-			state.stage_card(index)
+			var merge_index := _merge_target_at(at_position, data)
+			if merge_index >= 0:
+				state.merge_into_staged(index, merge_index)
+			else:
+				state.stage_card(index)
 	elif zone == "play" and _drop_target_at(at_position) == "hand":
 		state.recall_card(index)
 
@@ -304,6 +326,47 @@ func _stageable_from_data(data: Dictionary) -> bool:
 	if index < 0 or index >= state.hand.size():
 		return false
 	return state.can_stage(state.hand[index])
+
+
+# rebuild 后旧子节点 hide+queue_free 但帧末才移除，必须过滤，否则索引错位
+func _live_staged_buttons() -> Array[CardButton]:
+	var buttons: Array[CardButton] = []
+	for child in play_box.get_children():
+		if child is CardButton and not child.is_queued_for_deletion():
+			buttons.append(child)
+	return buttons
+
+
+# 拖拽中的手牌是否落在某张可叠的出牌区牌上 → 返回其槽位号，否则 -1
+func _merge_target_at(at_position: Vector2, data: Dictionary) -> int:
+	if String(data.get("zone", "")) != "hand":
+		return -1
+	var hand_index := int(data.get("index", -1))
+	if hand_index < 0 or hand_index >= state.hand.size():
+		return -1
+	var global_point := get_global_transform() * at_position
+	var buttons := _live_staged_buttons()
+	var count: int = mini(buttons.size(), state.staged.size())
+	for i in count:
+		if buttons[i].get_global_rect().has_point(global_point):
+			if state.can_merge_with(state.hand[hand_index], i):
+				return i
+			return -1
+	return -1
+
+
+func _update_merge_hover(index: int) -> void:
+	var buttons := _live_staged_buttons()
+	var next: CardButton = null
+	if index >= 0 and index < buttons.size():
+		next = buttons[index]
+	if next == _merge_hover:
+		return
+	if _merge_hover != null and is_instance_valid(_merge_hover):
+		_merge_hover.set_merge_highlight(false)
+	_merge_hover = next
+	if _merge_hover != null:
+		_merge_hover.set_merge_highlight(true)
 
 
 func _drop_target_at(at_position: Vector2) -> String:
@@ -383,7 +446,10 @@ func _update_discard_zone(drag_data: Variant = null) -> void:
 		if card_id != "":
 			var card: CardData = CardDB.get_card(card_id)
 			if card != null:
-				hover_preview = "\n\n弃掉「%s」\n获得 Cost +%d" % [card.display_name, card.cost - 1]
+				if card.discard_effects.is_empty():
+					hover_preview = "\n\n弃掉「%s」\n获得 Cost +%d" % [card.display_name, card.cost - 1]
+				else:
+					hover_preview = "\n\n弃掉「%s」\n%s" % [card.display_name, card.text.replace("弃掉：", "")]
 	discard_zone_label.text = "弃牌区\n\n把手牌拖到这里弃掉\n获得（牌的 Cost - 1）点 Cost\n\n本回合已获得 +%d%s" % [_turn_discard_gain, hover_preview]
 
 
@@ -507,9 +573,20 @@ func _on_card_recalled(_card: CardData) -> void:
 
 
 func _on_card_played(card: CardData) -> void:
-	var sfx := String(SFX_BY_CARD.get(card.id, ""))
-	if sfx != "":
-		_play_sfx(sfx)
+	# 合成牌 id 形如 "strike+heavy_strike"：取第一张原牌的 id 找音效
+	var base_id := String(card.id).split("+")[0]
+	if SFX_BY_CARD.has(base_id):
+		_play_sfx(String(SFX_BY_CARD[base_id]))
+	elif base_id.begins_with("heavy_strike"):
+		_play_sfx("sfx_hit")
+	elif base_id.begins_with("strong_guard"):
+		_play_sfx("sfx_guard")
+	elif base_id.begins_with("shift"):
+		_play_sfx("sfx_stage")
+
+
+func _on_card_merged(_merged: CardData) -> void:
+	_play_sfx("sfx_stage")
 
 
 func _on_card_discarded(_card: CardData) -> void:

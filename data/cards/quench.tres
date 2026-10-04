@@ -4,14 +4,15 @@
 
 [resource]
 script = ExtResource("1_card")
-id = "guard"
-display_name = "护住"
-kind = 1
+id = "quench"
+display_name = "淬火"
+kind = 5
 cost = 1
-text = "挡下 2 点伤害。"
-flavor = "她下手其实不重。"
+text = "弃掉：本回合伤害 +2。"
+flavor = "烧掉一点什么，手就不会抖。"
 permanent = false
-effects = Array[Dictionary]([{
-"op": "gain_block",
+effects = Array[Dictionary]([])
+discard_effects = Array[Dictionary]([{
+"op": "buff_attack_turn",
 "amount": 2
 }])

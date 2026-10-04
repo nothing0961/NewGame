@@ -44,7 +44,7 @@ func rebuild() -> void:
 func _make_warehouse_button(card_id: String) -> Button:
 	var card := CardDB.get_card(card_id)
 	var button := Button.new()
-	button.text = "「%s」 Cost %d　仓库 ×%d　已入卡组 %d\n%s" % [card.display_name, card.cost, pool.owned_count(card_id), pool.deck_count(card_id), card.text]
+	button.text = "【%s】「%s」 Cost %d　仓库 ×%d　已入卡组 %d\n%s" % [card.kind_label(), card.display_name, card.cost, pool.owned_count(card_id), pool.deck_count(card_id), card.text]
 	button.disabled = not pool.can_add(card_id)
 	button.add_theme_font_size_override("font_size", 15)
 	button.pressed.connect(_on_warehouse_card_pressed.bind(card_id))
@@ -54,7 +54,7 @@ func _make_warehouse_button(card_id: String) -> Button:
 func _make_deck_button(card_id: String) -> Button:
 	var card := CardDB.get_card(card_id)
 	var button := Button.new()
-	button.text = "「%s」 Cost %d　（点击移出）\n%s" % [card.display_name, card.cost, card.text]
+	button.text = "【%s】「%s」 Cost %d　（点击移出）\n%s" % [card.kind_label(), card.display_name, card.cost, card.text]
 	button.add_theme_font_size_override("font_size", 15)
 	button.pressed.connect(_on_deck_card_pressed.bind(card_id))
 	return button

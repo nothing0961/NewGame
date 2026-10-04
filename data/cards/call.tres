@@ -6,7 +6,7 @@
 script = ExtResource("1_card")
 id = "call"
 display_name = "呼喊"
-kind = 0
+kind = 2
 cost = 1
 text = "喊：「回来！」\n她愣住，抬起头——这一回合她没有打你，只是小声说：「……对不起。」"
 flavor = "在这一侧没有人认识你。可「回来」两个字，她听得见。"
