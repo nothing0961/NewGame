@@ -32,7 +32,10 @@ func rebuild() -> void:
 	for child in deck_list.get_children():
 		child.hide()
 		child.queue_free()
-	for card_id in BattleConfig.WAREHOUSE_INITIAL:
+	# 仓库按 owned 动态显示（含已收罪卡，design/design-round3.md §6）
+	for card_id in pool.owned:
+		if pool.owned_count(String(card_id)) <= 0:
+			continue
 		warehouse_list.add_child(_make_warehouse_button(String(card_id)))
 	for card_id in pool.deck:
 		deck_list.add_child(_make_deck_button(String(card_id)))
@@ -44,7 +47,10 @@ func rebuild() -> void:
 func _make_warehouse_button(card_id: String) -> Button:
 	var card := CardDB.get_card(card_id)
 	var button := Button.new()
-	button.text = "【%s】「%s」 Cost %d　仓库 ×%d　已入卡组 %d\n%s" % [card.kind_label(), card.display_name, card.cost, pool.owned_count(card_id), pool.deck_count(card_id), card.text]
+	var line := "【%s】「%s」 Cost %d　仓库 ×%d　已入卡组 %d\n%s" % [card.kind_label(), card.display_name, card.cost, pool.owned_count(card_id), pool.deck_count(card_id), card.text]
+	if pool.is_sin_card(card_id):
+		line += "\n（罪卡：卡组里最多放一张）"
+	button.text = line
 	button.disabled = not pool.can_add(card_id)
 	button.add_theme_font_size_override("font_size", 15)
 	button.pressed.connect(_on_warehouse_card_pressed.bind(card_id))

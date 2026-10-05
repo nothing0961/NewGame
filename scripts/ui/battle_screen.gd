@@ -5,6 +5,7 @@ const OVERLAY_STRIP := "strip"
 const OVERLAY_PURIFY := "purify"
 const OVERLAY_DEBRIEF := "debrief"
 const OVERLAY_PRACTICE_END := "practice_end"
+const OVERLAY_DEFEAT := "defeat"
 const OVERLAY_DISCARD := "discard"
 
 const TIMER_WARN_SECONDS := 10.0
@@ -24,6 +25,8 @@ const SFX_EXTS: Array[String] = [".ogg", ".wav", ".mp3"]
 const SFX_BY_CARD := {"strike": "sfx_hit", "guard": "sfx_guard", "call": "sfx_call"}
 
 signal battle_ended(practice: bool)
+# 判负（教程战/层战）；main_flow 收到后回该层第一关（教程层回序章）
+signal battle_lost()
 
 @onready var enemy_name_label: Label = %EnemyNameLabel
 @onready var enemy_hp_label: Label = %EnemyHpLabel
@@ -67,12 +70,14 @@ var _sfx_players := {}
 
 var _battle_mode := BattleState.Mode.TUTORIAL
 var _deck: Array = []
+var _stage: Dictionary = {}
 var _finished_reported := false
 
 
-func configure(battle_mode: int, deck: Array) -> void:
+func configure(battle_mode: int, deck: Array, stage: Dictionary = {}) -> void:
 	_battle_mode = battle_mode
 	_deck = deck
+	_stage = stage
 
 
 func _ready() -> void:
@@ -91,14 +96,28 @@ func _ready() -> void:
 	continue_button.pressed.connect(_on_continue_pressed)
 	quit_practice_button.pressed.connect(_on_quit_practice_pressed)
 	quit_practice_button.visible = _battle_mode == BattleState.Mode.PRACTICE
-	absorb_button.text = "拿起 %s" % CardDB.get_card(BattleConfig.SIN_CARD_ID).display_name
 	_setup_zone_styles()
 	hand_box.resized.connect(_layout_hand)
 	if _battle_mode == BattleState.Mode.PRACTICE:
 		state.start_practice(_deck)
+	elif _battle_mode == BattleState.Mode.STORY:
+		state.start_story(_deck, _stage)
 	else:
 		state.start(_deck)
+	if state.sin_card_id != "":
+		absorb_button.text = "拿起 %s" % CardDB.get_card(state.sin_card_id).display_name
 	_layout_hand.call_deferred()
+
+
+# 收下环节的罪卡（战斗结束后由 main_flow 读走入仓库）
+func collected_sin_ids() -> Array[String]:
+	var ids: Array[String] = []
+	if state == null:
+		return ids
+	for card in state.collection:
+		if card.kind == CardData.Kind.SIN:
+			ids.append(card.id)
+	return ids
 
 
 func _process(delta: float) -> void:
@@ -146,7 +165,7 @@ func _sync_ui() -> void:
 	enemy_name_label.text = state.enemy_name
 	enemy_hp_label.text = "生命 %d / %d" % [state.enemy_hp, state.enemy_max_hp]
 	enemy_hand_label.text = "手牌 %d 张" % state.enemy_hand.size()
-	enemy_hand_label.visible = state.mode == BattleState.Mode.TUTORIAL
+	enemy_hand_label.visible = state.mode != BattleState.Mode.PRACTICE
 	player_hp_label.text = "你：%d / %d" % [state.player_hp, BattleConfig.PLAYER_MAX_HP]
 	# 显示本回合「可用」Cost＝现有 − 出牌区已摆：摆放/收回/弃牌都实时反映
 	cost_label.text = "回合 %d　Cost %d / %d" % [state.turn_count, maxi(0, state.player_cost - state.staged_cost()), BattleConfig.PLAYER_MAX_COST]
@@ -464,7 +483,7 @@ func _on_end_turn_pressed() -> void:
 
 
 func _on_absorb_pressed() -> void:
-	if state.absorb_wrath():
+	if state.absorb_sin():
 		_play_sfx("sfx_absorb")
 
 
@@ -479,8 +498,12 @@ func _on_quit_practice_pressed() -> void:
 func _on_continue_pressed() -> void:
 	match overlay_mode:
 		OVERLAY_PURIFY:
-			debrief_index = 0
-			_set_overlay(OVERLAY_DEBRIEF)
+			# 三问＝教程层特有节拍；层战净化读白后直接结束（design/design-round3.md §1）
+			if _battle_mode == BattleState.Mode.STORY:
+				state.finish_debrief()
+			else:
+				debrief_index = 0
+				_set_overlay(OVERLAY_DEBRIEF)
 		OVERLAY_DEBRIEF:
 			debrief_index += 1
 			if debrief_index < BattleConfig.TEXT_DEBRIEF.size():
@@ -489,6 +512,8 @@ func _on_continue_pressed() -> void:
 				state.finish_debrief()
 		OVERLAY_PRACTICE_END:
 			_finish(true)
+		OVERLAY_DEFEAT:
+			battle_lost.emit()
 		_:
 			_set_overlay(OVERLAY_NONE)
 
@@ -507,6 +532,8 @@ func _on_phase(phase: int) -> void:
 			_play_sfx("sfx_strip")
 		BattleState.Phase.DEBRIEF:
 			_set_overlay(OVERLAY_PURIFY)
+		BattleState.Phase.DEFEAT:
+			_set_overlay(OVERLAY_DEFEAT)
 		BattleState.Phase.ENDED:
 			if _battle_mode == BattleState.Mode.PRACTICE:
 				_set_overlay(OVERLAY_PRACTICE_END)
@@ -526,18 +553,24 @@ func _set_overlay(mode: String) -> void:
 	overlay_mode = mode
 	overlay.visible = mode != OVERLAY_NONE
 	absorb_button.visible = mode == OVERLAY_STRIP
-	continue_button.visible = mode == OVERLAY_PURIFY or mode == OVERLAY_DEBRIEF or mode == OVERLAY_PRACTICE_END
-	continue_button.text = "返回练习站" if mode == OVERLAY_PRACTICE_END else "继续"
+	continue_button.visible = mode == OVERLAY_PURIFY or mode == OVERLAY_DEBRIEF or mode == OVERLAY_PRACTICE_END or mode == OVERLAY_DEFEAT
+	continue_button.text = "继续"
+	if mode == OVERLAY_PRACTICE_END:
+		continue_button.text = "返回练习站"
+	elif mode == OVERLAY_DEFEAT:
+		continue_button.text = BattleConfig.TEXT_DEFEAT_BUTTON
 	discard_scroll.visible = mode == OVERLAY_DISCARD
 	match mode:
 		OVERLAY_STRIP:
-			story_text.text = "\n".join(PackedStringArray(BattleConfig.TEXT_STRIP))
+			story_text.text = "\n".join(PackedStringArray(state.strip_lines))
 		OVERLAY_PURIFY:
-			story_text.text = "\n".join(PackedStringArray(BattleConfig.TEXT_PURIFY))
+			story_text.text = "\n".join(PackedStringArray(state.purify_lines))
 		OVERLAY_DEBRIEF:
 			_show_debrief_question()
 		OVERLAY_PRACTICE_END:
-			story_text.text = BattleConfig.TEXT_PRACTICE_END
+			story_text.text = state.practice_end_text
+		OVERLAY_DEFEAT:
+			story_text.text = BattleConfig.TEXT_DEFEAT
 		OVERLAY_DISCARD:
 			_rebuild_discard_list()
 

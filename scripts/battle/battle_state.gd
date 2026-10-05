@@ -1,8 +1,8 @@
 class_name BattleState
 extends RefCounted
 
-enum Phase { PLAYER, STRIP, DEBRIEF, ENDED }
-enum Mode { TUTORIAL, PRACTICE }
+enum Phase { PLAYER, STRIP, DEBRIEF, DEFEAT, ENDED }
+enum Mode { TUTORIAL, PRACTICE, STORY }
 
 signal log_event(text: String)
 signal stats_changed()
@@ -16,6 +16,14 @@ signal card_merged(merged: CardData)
 var mode: int = Mode.TUTORIAL
 var enemy_name := BattleConfig.ENEMY_NAME
 var enemy_max_hp := BattleConfig.ENEMY_MAX_HP
+var enemy_deck_composition: Dictionary = {}
+# 层主战：胜利后走净化/收下（教程战同为层主战）；层内小怪战：胜利直接结束
+var is_boss := true
+# 本场收下（吸收）的罪卡；教程＝暴怒，层主战由关卡配置给出
+var sin_card_id := BattleConfig.SIN_CARD_ID
+var strip_lines: Array = BattleConfig.TEXT_STRIP
+var purify_lines: Array = BattleConfig.TEXT_PURIFY
+var practice_end_text := BattleConfig.TEXT_PRACTICE_END
 
 var player_hp := 0
 var player_cost := 0
@@ -23,7 +31,6 @@ var player_block := 0
 var enemy_hp := 0
 var attack_bonus := 0
 var turn_attack_bonus := 0  # 「弃掉：本回合伤害 +N」类效果，回合开始时清零
-var revives := 0
 var enemy_suppressed := false
 var debug_force_plays := -1  # -1=随机出牌数, 0..n=强制出牌数（仅测试用）
 
@@ -43,14 +50,26 @@ var turn_count := 0
 var attack_plays_this_battle := 0
 var sin_available := false
 var sin_used_this_battle := false
+# 本场牌组里的罪卡（最多一张，组卡约束保证）；空＝本场无罪卡
+var deck_sin_id := ""
+
+var _stage: Dictionary = {}
 
 
 func start(custom_deck: Array = []) -> void:
+	_stage = {}
 	_setup(Mode.TUTORIAL, custom_deck)
 
 
 func start_practice(custom_deck: Array = []) -> void:
+	_stage = {}
 	_setup(Mode.PRACTICE, custom_deck)
+
+
+# 层内关卡战：stage 来自当前层路线（LayerConfig.generate_route 的池抽取节点）的所选节点（enemy / enemy_hp / enemy_deck / boss / sin_card / strip_lines / purify_lines）
+func start_story(custom_deck: Array, stage: Dictionary) -> void:
+	_stage = stage
+	_setup(Mode.STORY, custom_deck)
 
 
 func can_afford(card: CardData) -> bool:
@@ -79,27 +98,44 @@ func staged_cost() -> int:
 func _sin_available(card: CardData) -> bool:
 	if sin_used_this_battle:
 		return false
-	if card.id != BattleConfig.SIN_CARD_ID:
-		return true
+	if deck_sin_id == "" or card.id != deck_sin_id:
+		return false
 	return sin_available
 
 
 func sin_lock_reason() -> String:
+	if deck_sin_id == "":
+		return ""
 	if sin_used_this_battle:
-		return BattleConfig.TEXT_SIN_USED % CardDB.get_card(BattleConfig.SIN_CARD_ID).display_name
-	var task := BattleConfig.TEXT_SIN_TASK % BattleConfig.SIN_TASK_ATTACK_PLAYS
-	task += BattleConfig.TEXT_SIN_PROGRESS % [attack_plays_this_battle, BattleConfig.SIN_TASK_ATTACK_PLAYS]
-	return BattleConfig.TEXT_SIN_BLOCKED % [CardDB.get_card(BattleConfig.SIN_CARD_ID).display_name, task, "", BattleConfig.SIN_ROUND_FALLBACK]
+		return BattleConfig.TEXT_SIN_USED % CardDB.get_card(deck_sin_id).display_name
+	var config := _sin_task_config()
+	var task := ""
+	if String(config.get("task", "")) == BattleConfig.SIN_TASK_ATTACK:
+		var count: int = int(config.get("count", 0))
+		task = BattleConfig.TEXT_SIN_TASK % count
+		task += BattleConfig.TEXT_SIN_PROGRESS % [attack_plays_this_battle, count]
+	return BattleConfig.TEXT_SIN_BLOCKED % [CardDB.get_card(deck_sin_id).display_name, task, "", BattleConfig.SIN_ROUND_FALLBACK]
 
 
 # 任务达成或回合保底 → 解锁；每场战斗只需解锁一次
 func _check_sin_unlock() -> void:
-	if sin_available:
+	if sin_available or deck_sin_id == "":
 		return
-	if turn_count < BattleConfig.SIN_ROUND_FALLBACK and attack_plays_this_battle < BattleConfig.SIN_TASK_ATTACK_PLAYS:
+	if turn_count < BattleConfig.SIN_ROUND_FALLBACK and not _sin_task_done():
 		return
 	sin_available = true
-	log_event.emit(BattleConfig.TEXT_SIN_UNLOCKED % CardDB.get_card(BattleConfig.SIN_CARD_ID).display_name)
+	log_event.emit(BattleConfig.TEXT_SIN_UNLOCKED % CardDB.get_card(deck_sin_id).display_name)
+
+
+func _sin_task_config() -> Dictionary:
+	return BattleConfig.SIN_TASK_CONFIG.get(deck_sin_id, {})
+
+
+func _sin_task_done() -> bool:
+	var config := _sin_task_config()
+	if String(config.get("task", "")) == BattleConfig.SIN_TASK_ATTACK:
+		return attack_plays_this_battle >= int(config.get("count", 0))
+	return false
 
 
 func stage_card(hand_index: int) -> bool:
@@ -269,7 +305,9 @@ func commit_staged() -> bool:
 	_check_sin_unlock()
 	if enemy_hp <= 0:
 		if mode == Mode.PRACTICE:
-			_end_practice()
+			_end_practice(true)
+		elif mode == Mode.STORY and not is_boss:
+			_end_story_stage()
 		else:
 			_enter_strip()
 	else:
@@ -335,10 +373,11 @@ func end_turn() -> bool:
 	return true
 
 
-func absorb_wrath() -> bool:
-	if phase != Phase.STRIP:
+# 收下：吸收本场罪卡（design/design-round3.md §6——收下入局内收藏，战斗结束即入仓库）
+func absorb_sin() -> bool:
+	if phase != Phase.STRIP or sin_card_id == "":
 		return false
-	var sin_card := CardDB.get_card(BattleConfig.SIN_CARD_ID)
+	var sin_card := CardDB.get_card(sin_card_id)
 	collection.append(sin_card)
 	sin_available = true
 	log_event.emit("你拿起了「%s」。" % sin_card.display_name)
@@ -362,15 +401,32 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 	if mode == Mode.PRACTICE:
 		enemy_name = BattleConfig.PRACTICE_ENEMY_NAME
 		enemy_max_hp = BattleConfig.PRACTICE_ENEMY_HP
+		enemy_deck_composition = {}
+		is_boss = false
+		sin_card_id = ""
+		strip_lines = []
+		purify_lines = []
+	elif mode == Mode.STORY:
+		enemy_name = String(_stage.get("enemy", ""))
+		enemy_max_hp = int(_stage.get("enemy_hp", BattleConfig.ENEMY_MAX_HP))
+		enemy_deck_composition = _stage.get("enemy_deck", {})
+		is_boss = bool(_stage.get("boss", false))
+		sin_card_id = String(_stage.get("sin_card", ""))
+		strip_lines = _stage.get("strip_lines", [])
+		purify_lines = _stage.get("purify_lines", [])
 	else:
 		enemy_name = BattleConfig.ENEMY_NAME
 		enemy_max_hp = BattleConfig.ENEMY_MAX_HP
+		enemy_deck_composition = BattleConfig.ENEMY_DECK_COMPOSITION
+		is_boss = true  # 教程战＝懒惰层主战：打倒后走净化
+		sin_card_id = BattleConfig.SIN_CARD_ID
+		strip_lines = BattleConfig.TEXT_STRIP
+		purify_lines = BattleConfig.TEXT_PURIFY
 	player_hp = BattleConfig.PLAYER_MAX_HP
 	player_cost = BattleConfig.PLAYER_MAX_COST
 	player_block = 0
 	enemy_hp = enemy_max_hp
 	attack_bonus = 0
-	revives = 0
 	enemy_suppressed = false
 	phase = Phase.PLAYER
 	batch_committed = false
@@ -386,7 +442,7 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 		log_event.emit(BattleConfig.TEXT_PRACTICE_START)
 	# 开局：双方各摸五张
 	_draw_from(draw_pile, discard_pile, hand, BattleConfig.HAND_SIZE)
-	if mode == Mode.TUTORIAL:
+	if mode != Mode.PRACTICE:
 		_draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, BattleConfig.HAND_SIZE)
 	_start_player_turn()
 
@@ -403,16 +459,21 @@ func _build_deck(custom_deck: Array) -> void:
 		for card_id in custom_deck:
 			draw_pile.append(CardDB.get_card(String(card_id)))
 	draw_pile.shuffle()
+	deck_sin_id = ""
+	for card in draw_pile:
+		if card.kind == CardData.Kind.SIN:
+			deck_sin_id = card.id
+			break
 
 
 func _build_enemy_deck() -> void:
 	enemy_draw_pile.clear()
 	enemy_hand.clear()
 	enemy_discard_pile.clear()
-	if mode != Mode.TUTORIAL:
+	if enemy_deck_composition.is_empty():
 		return
-	for card_id in BattleConfig.ENEMY_DECK_COMPOSITION:
-		for _i in BattleConfig.ENEMY_DECK_COMPOSITION[card_id]:
+	for card_id in enemy_deck_composition:
+		for _i in enemy_deck_composition[card_id]:
 			enemy_draw_pile.append(CardDB.get_card(card_id))
 	enemy_draw_pile.shuffle()
 
@@ -437,6 +498,8 @@ func _draw_from(source: Array[CardData], discard: Array[CardData], target: Array
 func _finish_round() -> void:
 	log_event.emit("—— %s的回合 ——" % enemy_name)
 	_enemy_turn()
+	if phase == Phase.DEFEAT or phase == Phase.ENDED:
+		return  # 玩家倒下 / 练习结束：回合不再推进
 	_gain_round_cards()
 	_start_player_turn()
 
@@ -444,7 +507,7 @@ func _finish_round() -> void:
 func _gain_round_cards() -> void:
 	var player_drawn := _draw_from(draw_pile, discard_pile, hand, BattleConfig.ROUND_GAIN)
 	log_event.emit(BattleConfig.TEXT_ROUND_GAIN_PLAYER % player_drawn)
-	if mode == Mode.TUTORIAL:
+	if mode != Mode.PRACTICE:
 		var enemy_drawn := _draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, BattleConfig.ROUND_GAIN)
 		log_event.emit(BattleConfig.TEXT_ROUND_GAIN_ENEMY % [enemy_name, enemy_drawn])
 
@@ -555,13 +618,18 @@ func _damage_player(amount: int) -> void:
 		player_hp = max(0, player_hp - to_hp)
 		log_event.emit("你受到 %d 点伤害。（生命 %d）" % [to_hp, player_hp])
 	if player_hp <= 0:
-		_revive_player()
+		_handle_defeat()
 
 
-func _revive_player() -> void:
-	revives += 1
-	player_hp = BattleConfig.PLAYER_MAX_HP
-	log_event.emit("%s（生命回到 %d）" % [BattleConfig.TEXT_REVIVE, player_hp])
+# 死亡规则（design/design-round3.md §5）：教程战与层战判负（法阵拽回退役）；
+# 练习战不判负——失败即练习结束
+func _handle_defeat() -> void:
+	if mode == Mode.PRACTICE:
+		_end_practice(false)
+		return
+	phase = Phase.DEFEAT
+	log_event.emit(BattleConfig.TEXT_DEFEAT)
+	phase_changed.emit(phase)
 
 
 func _enter_strip() -> void:
@@ -569,7 +637,14 @@ func _enter_strip() -> void:
 	phase_changed.emit(phase)
 
 
-func _end_practice() -> void:
+func _end_practice(won: bool) -> void:
 	phase = Phase.ENDED
-	log_event.emit(BattleConfig.TEXT_PRACTICE_END)
+	practice_end_text = BattleConfig.TEXT_PRACTICE_END if won else BattleConfig.TEXT_PRACTICE_DEFEAT
+	log_event.emit(practice_end_text)
+	phase_changed.emit(phase)
+
+
+func _end_story_stage() -> void:
+	phase = Phase.ENDED
+	log_event.emit(BattleConfig.TEXT_STAGE_WIN)
 	phase_changed.emit(phase)

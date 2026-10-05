@@ -14,7 +14,8 @@ func _initialize() -> void:
 	test_call_suppresses()
 	test_card_costs()
 	test_cost_pool()
-	test_revive_flow()
+	test_defeat_flow()
+	test_practice_defeat()
 	test_staging_zone()
 	test_commit_batch()
 	test_end_turn_settles_staged()
@@ -30,10 +31,18 @@ func _initialize() -> void:
 	test_amplify_cards()
 	test_card_stacking()
 	test_practice_battle()
+	test_layer_data()
+	test_card_pool_sin()
+	test_story_battle_small()
+	test_story_battle_boss()
 	# 等一帧让 SceneTree 进入运行态，节点加入 root 时 _ready 才会立即执行
 	await process_frame
 	await test_battle_scene_tutorial()
 	await test_battle_scene_practice()
+	await test_battle_scene_defeat()
+	await test_map_page()
+	await test_event_page()
+	await test_transition_page()
 	await test_scene_turn_timer()
 	await test_scene_drag_and_discard()
 	await test_scene_stacking()
@@ -45,6 +54,7 @@ func _initialize() -> void:
 	await test_sfx_wiring()
 	await test_main_flow_full()
 	await test_main_flow_skip_practice()
+	await test_main_flow_layer2()
 	if failures == 0:
 		print("== 全部通过 ==")
 		quit(0)
@@ -65,6 +75,14 @@ func _make_state(logs: Array = []) -> BattleState:
 	var state := BattleState.new()
 	state.log_event.connect(func(text: String) -> void: logs.append(text))
 	state.start()
+	return state
+
+
+# 罪卡检定只对「牌组里的罪卡」生效（deck_sin_id 由开局扫描得出）；构造带罪卡的牌组
+func _make_sin_state(logs: Array = [], sin_id := "wrath") -> BattleState:
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start([sin_id, "strike", "strike", "strike", "strike", "guard", "guard", "guard"])
 	return state
 
 
@@ -117,6 +135,40 @@ func _count_log(logs: Array, fragment: String) -> int:
 	return count
 
 
+func _pool_battle(enemy_name: String) -> Dictionary:
+	for battle in LayerConfig.LAYER2_BATTLES:
+		if String(battle.get("enemy", "")) == enemy_name:
+			return battle
+	return {}
+
+
+func _pool_event(title: String) -> Dictionary:
+	for event_item in LayerConfig.LAYER2_EVENTS:
+		if String(event_item.get("title", "")) == title:
+			return event_item
+	return {}
+
+
+func _route_signature(route: Array) -> String:
+	var column_parts := PackedStringArray()
+	for column in route:
+		var node_parts := PackedStringArray()
+		for stage in column:
+			node_parts.append(String(stage.get("enemy", stage.get("title", "?"))))
+		column_parts.append(",".join(node_parts))
+	return "|".join(column_parts)
+
+
+# 层内流程测试夹具：固定三列（3 选 1 → 2 选 1 → 层主战），排除随机性干扰；
+# 随机性由 test_layer_data 的生成器测试单独覆盖
+func _fixture_route() -> Array:
+	return [
+		[_pool_event("粉雾"), _pool_battle("污染体"), _pool_event("镜阶")],
+		[_pool_battle("残响回廊"), _pool_event("烛台走廊")],
+		[LayerConfig.LAYER2_BOSS],
+	]
+
+
 func _check_cost_label(scene: Variant, cost_text: String, message: String) -> void:
 	var label := scene.get_node("%CostLabel") as Label
 	check(label.text.ends_with(cost_text), message + "（实际：" + label.text + "）")
@@ -133,6 +185,21 @@ func _first_live_button(container: Node, prefix: String) -> Button:
 				return button
 		elif button.text.contains(prefix):
 			return button
+	return null
+
+
+# 深层查找：程序化页面（地图/事件/过渡）按钮嵌在多层容器里，且 rebuild 后需跳过待释放节点
+func _deep_find_button(node: Node, prefix: String) -> Button:
+	if node is Button and not node.is_queued_for_deletion():
+		var button := node as Button
+		if button.text.contains(prefix):
+			return button
+	for child in node.get_children():
+		if child.is_queued_for_deletion():
+			continue
+		var found := _deep_find_button(child, prefix)
+		if found != null:
+			return found
 	return null
 
 
@@ -250,7 +317,7 @@ func test_cards_load() -> void:
 
 func test_wrath_effects() -> void:
 	print("[罪牌：3 伤 + 攻击永久 +1]")
-	var state := _make_state()
+	var state := _make_sin_state()
 	state.debug_force_plays = 0
 	state.sin_available = true
 	state.gain_card(CardDB.get_card("wrath"))
@@ -269,13 +336,14 @@ func test_wrath_effects() -> void:
 func test_sin_unlock_rules() -> void:
 	print("[罪卡规则：任务+8回合保底解锁、每场仅一次]")
 	var logs: Array = []
-	var state := _make_state(logs)
+	var state := _make_sin_state(logs)
 	state.debug_force_plays = 0
 	state.gain_card(CardDB.get_card("wrath"))
+	check(state.deck_sin_id == "wrath", "牌组里的罪卡被识别为本场检定对象")
 	check(not state.sin_available, "开局罪卡封锁")
 	check(not state.can_stage(CardDB.get_card("wrath")), "封锁时不能摆出")
 	check(state.sin_lock_reason().contains("封印"), "封锁提示在")
-	check(state.sin_lock_reason().contains("0/%d" % BattleConfig.SIN_TASK_ATTACK_PLAYS), "任务进度 0/3")
+	check(state.sin_lock_reason().contains("0/%d" % int(BattleConfig.SIN_TASK_CONFIG["wrath"]["count"])), "任务进度 0/3")
 	var index := _find_card(state.hand, "wrath")
 	check(not state.stage_card(index), "封锁时摆放被拒")
 	check(state.hand.has(CardDB.get_card("wrath")), "罪卡还在手里")
@@ -307,7 +375,7 @@ func test_sin_unlock_rules() -> void:
 	check(not state.can_stage(CardDB.get_card("wrath")), "同一场第二张同 id 罪卡也被禁止")
 	check(state.sin_lock_reason().contains("已经用过了"), "已用提示在")
 	# 保底路径：新的一场只过回合不出攻击牌，第 8 回合解锁
-	var state2 := _make_state()
+	var state2 := _make_sin_state()
 	state2.debug_force_plays = 0
 	for _i in 7:
 		state2.end_turn()
@@ -315,9 +383,18 @@ func test_sin_unlock_rules() -> void:
 	check(state2.sin_available, "8 回合保底解锁")
 	check(state2.attack_plays_this_battle == 0, "全程没出攻击牌，纯保底")
 	# 新的一场重新检定
-	var state3 := _make_state()
+	var state3 := _make_sin_state()
 	state3.debug_force_plays = 0
 	check(not state3.sin_available, "新一场战斗罪卡重新封锁")
+	# 不带罪卡的牌组：罪卡检定整场不生效（手里拿到也不解锁不出）
+	var state4 := _make_state()
+	state4.debug_force_plays = 0
+	check(state4.deck_sin_id == "", "牌组无罪卡时无检定对象")
+	check(state4.sin_lock_reason() == "", "无罪卡时无封锁提示")
+	check(not state4.can_stage(CardDB.get_card("wrath")), "罪卡不在牌组里时也摆不出")
+	for _i in 8:
+		state4.end_turn()
+	check(not state4.sin_available, "无罪卡时过 8 回合也不解锁")
 
 
 func test_new_card_effects() -> void:
@@ -375,7 +452,7 @@ func test_guard_blocks_enemy_plays() -> void:
 	state.commit_staged()
 	check(state.player_hp == BattleConfig.PLAYER_MAX_HP, "对方两张占位牌共 2 点伤害被同批打出的护住完整挡下")
 	check(state.player_block == 0, "格挡正好用掉；新回合格挡清零")
-	check(state.revives == 0, "没有倒下")
+	check(state.phase != BattleState.Phase.DEFEAT, "没有倒下")
 	check(_log_contains(logs, "挡"), "日志记录了挡下")
 	check(state.phase == BattleState.Phase.PLAYER, "回到新回合")
 
@@ -415,6 +492,8 @@ func test_cost_pool() -> void:
 	check(state.recall_card(0), "可以收回")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "收回不补也不扣")
 	state.player_cost = 5
+	state.deck_sin_id = "wrath"
+	state.sin_available = true  # 本测试只考 Cost 门槛，先放行罪卡检定
 	state.hand.append(CardDB.get_card("wrath"))
 	var wrath_index := _find_card(state.hand, "wrath")
 	check(not state.can_stage(state.hand[wrath_index]), "Cost 不够摆不进暴怒（需 6 剩 5）")
@@ -431,18 +510,34 @@ func test_cost_pool() -> void:
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "打出即结束回合，新回合 Cost 重置满")
 
 
-func test_revive_flow() -> void:
-	print("[倒下：法阵拉回]")
+func test_defeat_flow() -> void:
+	print("[判负：倒下不复活，回合不再推进]")
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 5
-	var guard := 0
-	while state.revives == 0 and guard < 10:
-		guard += 1
+	var safety := 0
+	while state.phase == BattleState.Phase.PLAYER and safety < 20:
+		safety += 1
 		state.end_turn()
-	check(state.revives == 1, "吃满 10 伤后倒下一次")
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP, "回满血")
-	check(_log_contains(logs, "法阵亮了一下"), "法阵读白出现")
+	check(state.phase == BattleState.Phase.DEFEAT, "吃满伤害后倒下")
+	check(state.player_hp == 0, "生命归零")
+	check(_log_contains(logs, "得从头再来"), "判负读白出现")
+	check(not state.end_turn(), "判负后结束回合被拒")
+	check(not state.commit_staged(), "判负后不能结算")
+	check(not state.stage_card(0), "判负后不能摆牌")
+
+
+func test_practice_defeat() -> void:
+	print("[练习战：倒下不判负，练习结束]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_practice(["strike", "strike", "strike", "strike", "strike"])
+	state._damage_player(BattleConfig.PLAYER_MAX_HP + 5)
+	check(state.phase == BattleState.Phase.ENDED, "练习中倒下＝练习结束")
+	check(state.player_hp == 0, "生命归零")
+	check(_log_contains(logs, BattleConfig.TEXT_PRACTICE_DEFEAT), "练习判负读白")
+	check(state.practice_end_text == BattleConfig.TEXT_PRACTICE_DEFEAT, "结束文案按败北切换")
 
 
 func test_staging_zone() -> void:
@@ -673,7 +768,7 @@ func test_full_victory_flow() -> void:
 	check(state.phase == BattleState.Phase.STRIP, "打倒后进入净化时刻")
 	check(state.enemy_hp == 0, "她归零了")
 	check(state.collection.is_empty(), "净化前收藏为空")
-	check(state.absorb_wrath(), "拿起暴怒")
+	check(state.absorb_sin(), "拿起暴怒")
 	check(state.collection.size() == 1 and state.collection[0].id == "wrath", "暴怒进收藏")
 	check(_find_card(state.discard_pile, "wrath") == -1, "暴怒不在弃牌堆")
 	check(_find_card(state.draw_pile, "wrath") == -1, "暴怒不在抽牌堆")
@@ -824,7 +919,7 @@ func test_card_stacking() -> void:
 	check(state.discard_pile[0].id == "strike" and state.discard_pile[1].id == "strike", "弃牌堆里是原牌不是合成体")
 	check(_log_contains(logs, "合成「打击＋打击」"), "合成日志出现")
 	# 三张合成：费用 1+1+1+2×1=5；2+2+4=8 伤；累计 3 张攻击触发罪卡任务解锁
-	var state2 := _make_state()
+	var state2 := _make_sin_state()
 	state2.debug_force_plays = 0
 	state2.hand.clear()
 	state2.hand.append(CardDB.get_card("strike"))
@@ -907,7 +1002,177 @@ func test_practice_battle() -> void:
 	check(state.phase == BattleState.Phase.ENDED, "打空血量后直接结束（不过净化）")
 	check(_log_contains(logs, BattleConfig.TEXT_PRACTICE_END), "结束读白出现")
 	check(state.collection.is_empty(), "练习没有罪卡")
-	check(not state.absorb_wrath(), "练习结束后也没有拿起环节")
+	check(not state.absorb_sin(), "练习结束后也没有拿起环节")
+
+
+func test_layer_data() -> void:
+	print("[层数据：八层表 / 占位池 / 路线随机生成 / 局内进度]")
+	check(LayerConfig.MAX_LAYER == 8, "共八层")
+	check(LayerConfig.layer_name(1) == "懒惰" and LayerConfig.demon_name(1) == "贝尔芬格", "第 1 层懒惰·贝尔芬格")
+	check(LayerConfig.layer_name(2) == "色欲" and LayerConfig.demon_name(2) == "阿斯莫德", "第 2 层色欲·阿斯莫德")
+	check(LayerConfig.layer_name(8) == "同位体" and LayerConfig.demon_name(8) == "贝嘉", "第 8 层同位体·贝嘉")
+	# 占位池（作战 4＋事件 5；层主独立）
+	check(LayerConfig.LAYER2_BATTLES.size() == 4, "作战池 4 项")
+	check(LayerConfig.LAYER2_EVENTS.size() == 5, "事件池 5 项")
+	check(LayerConfig.LAYER2_BOSS.get("boss", false) and String(LayerConfig.LAYER2_BOSS.get("enemy", "")) == "阿斯莫德", "层主独立不入池")
+	for battle in LayerConfig.LAYER2_BATTLES:
+		check(String(battle.get("type", "")) == LayerConfig.TYPE_BATTLE and String(battle.get("enemy", "")) != "" and int(battle.get("enemy_hp", 0)) > 0 and not (battle.get("enemy_deck", {}) as Dictionary).is_empty(), "作战池字段完整：" + String(battle.get("enemy", "")))
+	for event_item in LayerConfig.LAYER2_EVENTS:
+		check(String(event_item.get("title", "")) != "" and String(event_item.get("scene", "")) != "" and (event_item.get("choices", []) as Array).size() == 3 and (event_item.get("feedback", []) as Array).size() == 3, "事件池字段完整：" + String(event_item.get("title", "")))
+	# 生成器不变量（种子化批量掷路线）
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261005
+	var min_cols := 99
+	var max_cols := 0
+	var min_nodes := 99
+	var max_nodes := 0
+	for roll in 40:
+		var route := LayerConfig.generate_route(2, rng)
+		var cols := route.size()
+		min_cols = mini(min_cols, cols)
+		max_cols = maxi(max_cols, cols)
+		check(cols >= LayerConfig.ROUTE_MIN_COLUMNS and cols <= LayerConfig.ROUTE_MAX_COLUMNS, "列数 2–4（第 %d 掷：%d 列）" % [roll, cols])
+		var boss_column: Array = route[cols - 1]
+		check(boss_column.size() == 1 and boss_column[0].get("boss", false), "末列＝层主战唯一节点")
+		var seen := {}
+		for c in cols - 1:
+			var column: Array = route[c]
+			min_nodes = mini(min_nodes, column.size())
+			max_nodes = maxi(max_nodes, column.size())
+			check(column.size() >= LayerConfig.ROUTE_MIN_NODES and column.size() <= LayerConfig.ROUTE_MAX_NODES, "普通列 1–3 节点")
+			for stage in column:
+				var key := String(stage.get("enemy", stage.get("title", "")))
+				check(not seen.has(key), "全图不重复：" + key)
+				seen[key] = true
+	check(min_cols == LayerConfig.ROUTE_MIN_COLUMNS and max_cols == LayerConfig.ROUTE_MAX_COLUMNS, "40 掷里 2 列与 4 列都出现过")
+	check(min_nodes == LayerConfig.ROUTE_MIN_NODES and max_nodes == LayerConfig.ROUTE_MAX_NODES, "40 掷里 1 节点与 3 节点列都出现过")
+	check(LayerConfig.generate_route(1, rng).is_empty(), "教程层不走路线表")
+	check(LayerConfig.generate_route(3, rng).is_empty(), "第 3 层起内容待设计轮")
+	# 同种子可复现
+	var rng_a := RandomNumberGenerator.new()
+	rng_a.seed = 7
+	var rng_b := RandomNumberGenerator.new()
+	rng_b.seed = 7
+	check(_route_signature(LayerConfig.generate_route(2, rng_a)) == _route_signature(LayerConfig.generate_route(2, rng_b)), "同种子同路线")
+	check(LayerConfig.transition_lines(2).size() == 3, "第 2 层有上行过渡读白")
+	check(LayerConfig.transition_lines(1).is_empty(), "第 1 层过渡走教程结尾读白")
+	# RunState：进层懒生成一次、层内稳定；四态；死亡重掷（重生成）＋夹具行进
+	var run := RunState.new()
+	check(run.current_layer == 2, "教程完成后的目标是第 2 层")
+	check(not run.is_layer_unlocked(2), "未过教程时第 2 层锁定")
+	check(run.is_layer_unlocked(1), "教程层始终可进")
+	run.tutorial_done = true
+	check(run.is_layer_cleared(1), "教程完成后第 1 层已净化")
+	check(run.is_layer_unlocked(2), "第 2 层解锁")
+	check(not run.is_layer_unlocked(3), "第 3 层无内容仍锁定")
+	run.rng.seed = 424242
+	var generated := run.current_columns()
+	check(generated.size() >= LayerConfig.ROUTE_MIN_COLUMNS and (generated[generated.size() - 1][0] as Dictionary).get("boss", false), "首次读取生成合法路线")
+	check(_route_signature(run.current_columns()) == _route_signature(generated), "层内重复读取同一路线（缓存）")
+	var sig_before := _route_signature(generated)
+	check(run.column_index == 0 and not run.is_route_finished(), "开局在第一列")
+	run.reset_layer()
+	check(run.route_layer == -1, "死亡后路线缓存失效")
+	check(_route_signature(run.current_columns()) != sig_before, "死亡重掷＝重新生成新路线")
+	# 夹具注入：四态推进与完成（随机性已单独覆盖）
+	run.route = _fixture_route()
+	run.route_layer = run.current_layer
+	check(run.node_state(0, 0) == RunState.NodeState.CURRENT, "第一列节点当前可选")
+	check(run.node_state(1, 0) == RunState.NodeState.FUTURE, "第二列未到")
+	var picked := run.choose(2)
+	check(String(picked.get("title", "")) == "镜阶", "选下节点返回该关卡")
+	check(run.column_index == 1, "选路推进到第二列")
+	check(run.node_state(0, 2) == RunState.NodeState.DONE, "已走节点＝已走")
+	check(run.node_state(0, 0) == RunState.NodeState.MISSED, "同列未选＝错失")
+	check(run.node_state(1, 1) == RunState.NodeState.CURRENT, "第二列当前可选")
+	check(String(run.choose(0).get("enemy", "")) == "残响回廊", "第二列选作战节点")
+	check(not run.is_route_finished(), "还剩层主战")
+	check(run.choose(0).get("boss", false), "第三列选层主战")
+	check(run.is_route_finished(), "路线走完")
+	check(run.choose(0).is_empty(), "越界选择返回空")
+	run.reset_layer()
+	check(run.route_layer == -1, "死亡（含夹具）同样失效路线缓存待重掷")
+	check(run.column_index == 0 and not run.is_route_finished(), "死亡重置回第一列")
+	run.collect_sin("lust")
+	run.collect_sin("lust")
+	check(run.sin_cards.size() == 1, "罪卡收集不重复")
+	run.add_companion("阿斯莫德")
+	check(run.companions.has("阿斯莫德"), "层主同行入列")
+	run.complete_layer()
+	check(run.current_layer == 3, "层完成上行到第 3 层")
+	check(run.column_index == 0 and run.chosen.is_empty(), "上行后选路记录清空")
+	check(not run.is_layer_unlocked(3), "第 3 层仍锁定（待续）")
+	check(run.is_demo_end(), "到达 demo 边界")
+
+
+func test_card_pool_sin() -> void:
+	print("[罪卡入仓与卡组约束：最多一张]")
+	var pool := CardPool.new()
+	check(pool.owned_count("wrath") == 0, "初始没有罪卡")
+	check(not pool.is_sin_card("strike") and pool.is_sin_card("wrath"), "罪卡识别")
+	check(not pool.add_to_deck("wrath"), "仓库没有时加不进卡组")
+	pool.collect_sin("wrath")
+	check(pool.owned_count("wrath") == 1, "收下后仓库有这张罪卡")
+	pool.collect_sin("wrath")
+	check(pool.owned_count("wrath") == 1, "重复收下不叠加")
+	pool.collect_sin("lust")
+	check(pool.owned_count("lust") == 1, "不同罪卡各自入仓")
+	check(pool.add_to_deck("wrath"), "罪卡可以放进卡组")
+	check(pool.sin_in_deck(), "卡组里有罪卡")
+	check(not pool.add_to_deck("lust"), "卡组已有罪卡时不能再放第二张")
+	check(pool.remove_from_deck("wrath"), "罪卡可以移出")
+	check(not pool.sin_in_deck(), "移出后卡组无罪卡")
+	check(pool.add_to_deck("lust"), "换一张罪卡进卡组")
+
+
+func test_story_battle_small() -> void:
+	print("[层战·小怪：胜利直接结束，不过净化]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("污染体"))
+	check(state.mode == BattleState.Mode.STORY, "层战模式")
+	check(state.enemy_name == "污染体" and state.enemy_max_hp == 20, "对手与血量按关卡配置")
+	check(not state.is_boss, "小怪战非层主")
+	check(state.sin_card_id == "", "小怪战无收下环节")
+	state.debug_force_plays = 0
+	var safety := 0
+	while state.phase == BattleState.Phase.PLAYER and safety < 120:
+		safety += 1
+		_turn_cycle(state, ["strike"])
+	check(state.phase == BattleState.Phase.ENDED, "打空后直接结束")
+	check(_log_contains(logs, BattleConfig.TEXT_STAGE_WIN), "小怪战胜利读白")
+	check(not state.absorb_sin(), "小怪战没有收下环节")
+
+
+func test_story_battle_boss() -> void:
+	print("[层战·层主：胜利走净化与收下，罪卡按关卡]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	var stage: Dictionary = LayerConfig.LAYER2_BOSS
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], stage)
+	check(state.enemy_name == "阿斯莫德" and state.enemy_max_hp == 24, "层主名与血量按关卡")
+	check(state.is_boss, "层主战")
+	check(state.sin_card_id == "lust", "本场收下的罪卡＝色欲")
+	check(String(state.strip_lines[0]).contains("粉色的裙摆"), "净化时刻读白按关卡")
+	state.debug_force_plays = 0
+	var safety := 0
+	while state.phase == BattleState.Phase.PLAYER and safety < 120:
+		safety += 1
+		_turn_cycle(state, ["strike"])
+	check(state.phase == BattleState.Phase.STRIP, "打倒层主进入净化时刻")
+	check(state.absorb_sin(), "拿起色欲")
+	check(state.collection.size() == 1 and state.collection[0].id == "lust", "色欲进收藏")
+	check(state.phase == BattleState.Phase.DEBRIEF, "进入净化读白")
+	check(state.finish_debrief(), "读完即结束（层战无三问）")
+	check(state.phase == BattleState.Phase.ENDED, "层战结束")
+	# 牌组里带罪卡：本场检定对象＝色欲，任务参数按 Lust 配置
+	var state2 := BattleState.new()
+	state2.start_story(["lust", "strike", "strike", "strike", "strike"], stage)
+	check(state2.deck_sin_id == "lust", "牌组里的色欲被识别为检定对象")
+	check(state2.sin_lock_reason().contains("（0/2）"), "色欲任务进度 0/2")
+	check(not state2.sin_available, "开局封锁")
 
 
 func test_battle_scene_tutorial() -> void:
@@ -1050,6 +1315,139 @@ func test_battle_scene_practice() -> void:
 	await process_frame
 
 
+func test_battle_scene_defeat() -> void:
+	print("[战斗场景·判负：覆盖层＋battle_lost，不发 battle_ended]")
+	var packed := load("res://scenes/battle.tscn") as PackedScene
+	if packed == null:
+		return
+	var scene: Variant = packed.instantiate()
+	scene.configure(BattleState.Mode.STORY, ["strike", "strike", "strike", "strike", "strike"], _pool_battle("污染体"))
+	var viewport := _attach_scene(scene)
+	await process_frame
+	var lost_calls: Array = []
+	var ended_calls: Array = []
+	scene.battle_lost.connect(func() -> void: lost_calls.append(true))
+	scene.battle_ended.connect(func(practice: bool) -> void: ended_calls.append(practice))
+	scene.state.debug_force_plays = 5
+	var safety := 0
+	while scene.state.phase == BattleState.Phase.PLAYER and safety < 20:
+		safety += 1
+		scene.state.end_turn()
+	check(scene.state.phase == BattleState.Phase.DEFEAT, "层战判负")
+	var overlay := scene.get_node("%Overlay") as Control
+	check(overlay.visible, "判负覆盖层出现")
+	check((scene.get_node("%StoryText") as Label).text.contains("得从头再来"), "判负读白在屏上")
+	var continue_button := scene.get_node("%ContinueButton") as Button
+	check(continue_button.text == BattleConfig.TEXT_DEFEAT_BUTTON, "按钮＝重新开始本层")
+	continue_button.pressed.emit()
+	check(lost_calls == [true], "发出 battle_lost")
+	check(ended_calls.is_empty(), "判负不自行发 battle_ended（等主流程处理）")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_map_page() -> void:
+	print("[层地图页：三态＋当前层展开路线图（节点四态）]")
+	var page := MapPage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	var run := RunState.new()
+	run.tutorial_done = true
+	# 注入夹具路线（固定 3/2/1 列），覆盖 ✓/✕/当前/未到四态；随机性由 test_layer_data 覆盖
+	run.route = _fixture_route()
+	run.route_layer = run.current_layer
+	var picks: Array = []
+	page.node_requested.connect(func(index: int) -> void: picks.append(index))
+	page.build(run)
+	check(page.visible, "地图页在屏")
+	var layer1 := _deep_find_button(page, "第 1 层·懒惰")
+	check(layer1 != null and layer1.text.contains("已净化"), "第 1 层已净化")
+	check(layer1.disabled, "已净化层不可点（只有未解锁层可点）")
+	var layer2 := _deep_find_button(page, "第 2 层·色欲")
+	check(layer2 != null and layer2.text.contains("当前"), "第 2 层当前")
+	var layer3 := _deep_find_button(page, "第 3 层·暴食")
+	check(layer3 != null and layer3.text.contains("待续") and not layer3.disabled, "第 3 层待续可点")
+	layer3.pressed.emit()
+	check(page._toast.visible and page._toast.text.contains("待续"), "点未解锁层提示待续")
+	var fog := _deep_find_button(page, "事件·粉雾")
+	var pol1 := _deep_find_button(page, "作战·污染体")
+	var mirror := _deep_find_button(page, "事件·镜阶")
+	check(fog != null and not fog.disabled, "第一列事件节点可选")
+	check(pol1 != null and not pol1.disabled, "同列作战节点也可选")
+	check(mirror != null and not mirror.disabled, "同列第三个节点可选")
+	var echo := _deep_find_button(page, "作战·残响回廊")
+	check(echo != null and echo.disabled, "下一列节点未到不可点")
+	var boss_node := _deep_find_button(page, "层主战·阿斯莫德")
+	check(boss_node != null and boss_node.disabled, "层主战节点未到不可点")
+	fog.pressed.emit()
+	check(picks == [0], "点击节点发出 node_requested(0)")
+	run.choose(0)
+	page.build(run)
+	await process_frame
+	var fog_after := _deep_find_button(page, "事件·粉雾")
+	check(fog_after.text.contains("✓") and fog_after.disabled, "已走节点标 ✓ 不可再点")
+	var pol_after := _deep_find_button(page, "作战·污染体")
+	check(pol_after.text.contains("✕") and pol_after.disabled, "同列未选标 ✕ 错失")
+	var echo_after := _deep_find_button(page, "作战·残响回廊")
+	check(echo_after != null and not echo_after.disabled, "推进后第二列可选")
+	var candle_after := _deep_find_button(page, "事件·烛台走廊")
+	check(candle_after != null and not candle_after.disabled, "第二列事件节点可选")
+	check(_deep_find_button(page, "返回菜单") != null and _deep_find_button(page, "进入练习站") != null, "地图底部有练习站与菜单入口")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_event_page() -> void:
+	print("[事件页：三选一 → 就地反馈 → 完成]")
+	var page := EventPage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	var done: Array = []
+	page.completed.connect(func() -> void: done.append(true))
+	var stage: Dictionary = _pool_event("粉雾")
+	page.show_event(stage)
+	check(page._title.text == "粉雾", "标题按关卡")
+	check(page._scene.text.contains("淡粉色的雾"), "场景说明在屏上")
+	check(page._choices_box.get_child_count() == 3, "三个选项按钮")
+	var complete_button := page._complete_button as Button
+	check(complete_button.disabled, "未选择不能完成")
+	var choice0 := page._choices_box.get_child(0) as Button
+	choice0.pressed.emit()
+	check(page._feedback.text == String(stage["feedback"][0]), "选择后展出对应反馈")
+	check(not complete_button.disabled, "选择后可以完成")
+	check(choice0.disabled, "选择后选项锁定（只能选一次）")
+	complete_button.pressed.emit()
+	check(done == [true], "发出 completed")
+	# 第二个占位事件（烛台走廊）同样能上屏（等一帧清掉旧选项按钮）
+	var candle: Dictionary = _pool_event("烛台走廊")
+	page.show_event(candle)
+	await process_frame
+	check(page._title.text == "烛台走廊", "第二列事件节点数据完整")
+	check(page._choices_box.get_child_count() == 3, "烛台走廊三个选项")
+	check(page._feedback.text == "" and complete_button.disabled, "重开后反馈清空、完成按钮复位")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_transition_page() -> void:
+	print("[过渡页：读白分段＋插画缺失时纯色回退]")
+	var page := TransitionPage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	var done: Array = []
+	page.continued.connect(func() -> void: done.append(true))
+	page.show_transition(["第一行", "第二行"])
+	check(page._read_text.text == "第一行\n\n第二行", "读白按双换行分段")
+	var has_png := FileAccess.file_exists("res://assets/sprites/ui/transition_climb.png")
+	check(page._illustration.visible == has_png, "插画存在则显示，缺失则纯色回退")
+	var continue_button := _first_live_button(page, "继续")
+	check(continue_button != null, "继续按钮在")
+	continue_button.pressed.emit()
+	check(done == [true], "发出 continued")
+	viewport.queue_free()
+	await process_frame
+
+
 func test_scene_turn_timer() -> void:
 	print("[回合计时：到点自动结算并过回合]")
 	var packed := load("res://scenes/battle.tscn") as PackedScene
@@ -1121,7 +1519,9 @@ func test_scene_drag_and_discard() -> void:
 	check(scene.state.staged.is_empty(), "拖回后出牌区清空")
 	check(_count_live_card_buttons(hand_box) == 5, "手牌回到五张")
 	scene.state.gain_card(CardDB.get_card("wrath"))
-	scene.state.sin_available = true  # 本测试只验拖拽/悬停 UI：先解锁罪卡，不混入封印逻辑
+	# 本测试只验拖拽/悬停 UI：钉死罪卡为本场检定对象并解锁，不混入封印逻辑
+	scene.state.deck_sin_id = "wrath"
+	scene.state.sin_available = true
 	_check_cost_label(scene, "Cost 12 / 12", "弃牌前 Cost 12 / 12")
 	var wrath_button := _first_live_button(hand_box, "暴怒")
 	check(wrath_button != null, "手里出现暴怒")
@@ -1722,12 +2122,29 @@ func test_main_flow_full() -> void:
 	cont2.pressed.emit()
 	check(battle2.state.phase == BattleState.Phase.ENDED, "三问走完")
 	await process_frame
-	check(story_page.visible, "回到读白页（结尾）")
-	check(story.text.contains("贝尔芬格"), "同行结尾读白在屏上")
-	check(primary.text == "回到入口", "结尾按钮回到入口")
-	primary.pressed.emit()
-	check(menu_page.visible, "结尾读白后回到入口菜单")
-	check(menu_continue.text == "继续剧情（前往台阶）", "看过教学后按钮变为前往台阶")
+	var transition_page := main.get_node("%TransitionPage") as Control
+	var map_page := main.get_node("%MapPage") as Control
+	check(transition_page.visible, "教程战结束进入上行过渡页")
+	check((transition_page._read_text as Label).text.contains("贝尔芬格"), "同行过渡读白在屏上")
+	check(main.run.tutorial_done, "教程标记完成")
+	check(main.run.companions.has("贝尔芬格"), "贝尔芬格入同行列")
+	var trans_continue := _first_live_button(transition_page, "继续")
+	check(trans_continue != null, "过渡页有继续按钮")
+	trans_continue.pressed.emit()
+	check(map_page.visible, "过渡后进入层地图")
+	var layer1_row := _deep_find_button(map_page, "第 1 层·懒惰")
+	check(layer1_row != null and layer1_row.text.contains("已净化"), "第 1 层已净化")
+	var layer2_row := _deep_find_button(map_page, "第 2 层·色欲")
+	check(layer2_row != null and layer2_row.text.contains("当前"), "第 2 层当前")
+	var layer3_row := _deep_find_button(map_page, "第 3 层·暴食")
+	check(layer3_row != null and layer3_row.text.contains("待续"), "第 3 层待续")
+	var map_menu_button := _deep_find_button(map_page, "返回菜单")
+	check(map_menu_button != null, "地图有返回菜单入口")
+	map_menu_button.pressed.emit()
+	check(menu_page.visible, "地图可回入口菜单")
+	check(menu_continue.text == "继续剧情", "教程完成后菜单按钮为继续剧情")
+	menu_continue.pressed.emit()
+	check(map_page.visible, "继续剧情直达层地图")
 	viewport.queue_free()
 	await process_frame
 
@@ -1759,5 +2176,119 @@ func test_main_flow_skip_practice() -> void:
 	var battle: Variant = battle_host.get_child(0)
 	check(battle.state.mode == BattleState.Mode.TUTORIAL, "教程模式")
 	check(battle.state.hand.size() == BattleConfig.HAND_SIZE, "没组卡时用默认卡组，开局手牌 5 张")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_main_flow_layer2() -> void:
+	print("[第二层路线全流程：夹具选路（含死亡重掷）→ 层主战 → 上行 → 地图（demo 边界）]")
+	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport := _attach_scene(main)
+	var menu_page := main.get_node("%MenuPage") as Control
+	var map_page := main.get_node("%MapPage") as Control
+	var event_page := main.get_node("%EventPage") as Control
+	var transition_page := main.get_node("%TransitionPage") as Control
+	var battle_host := main.get_node("%BattleHost") as Control
+	await process_frame
+	# 跳过教程（教程战已由主流程测试覆盖）：直接置教程完成，从入口菜单进地图
+	(main.get_node("%PrimaryButton") as Button).pressed.emit()
+	main.run.tutorial_done = true
+	# 注入夹具路线（层内流程走指定节点）＋固定随机源（死亡重掷断言可复现）
+	main.run.route = _fixture_route()
+	main.run.route_layer = main.run.current_layer
+	main.run.rng.seed = 20261005
+	(main.get_node("%MenuContinueButton") as Button).pressed.emit()
+	check(map_page.visible, "继续剧情进入层地图")
+	# 第一列·事件（粉雾）
+	var fog := _deep_find_button(map_page, "事件·粉雾")
+	check(fog != null and not fog.disabled, "第一列事件节点当前可点")
+	fog.pressed.emit()
+	check(event_page.visible, "进入事件页")
+	check(event_page._title.text == "粉雾", "事件标题按节点")
+	(event_page._choices_box.get_child(0) as Button).pressed.emit()
+	check(not (event_page._complete_button as Button).disabled, "选择后可以完成")
+	(event_page._complete_button as Button).pressed.emit()
+	check(map_page.visible, "事件完成回地图")
+	check(main.run.column_index == 1, "选路推进到第二列")
+	# 第二列·作战（残响回廊）→ 故意判负，验证死亡回层首重选
+	var echo := _deep_find_button(map_page, "作战·残响回廊")
+	check(echo != null and not echo.disabled, "第二列作战节点当前可点")
+	echo.pressed.emit()
+	await process_frame
+	check(battle_host.get_child_count() == 1, "第二列作战进入战斗位")
+	var lost_battle: Variant = battle_host.get_child(0)
+	check(lost_battle.state.mode == BattleState.Mode.STORY, "层战模式")
+	check(lost_battle.state.enemy_name == "残响回廊" and lost_battle.state.enemy_max_hp == 16, "第二列作战按节点配置")
+	lost_battle.state.debug_force_plays = 5
+	var safety := 0
+	while lost_battle.state.phase == BattleState.Phase.PLAYER and safety < 20:
+		safety += 1
+		lost_battle.state.end_turn()
+	check(lost_battle.state.phase == BattleState.Phase.DEFEAT, "判负")
+	(lost_battle.get_node("%ContinueButton") as Button).pressed.emit()
+	await process_frame
+	check(battle_host.get_child_count() == 0, "判负后战斗已释放")
+	check(map_page.visible, "判负回地图")
+	check(main.run.column_index == 0 and main.run.chosen.is_empty(), "死亡回层首＝选路重置")
+	check(_route_signature(main.run.current_columns()) != _route_signature(_fixture_route()), "死亡重掷＝重新生成新路线（rng 播种，可复现）")
+	# 重掷已断言；重新注入夹具，继续走固定节点（第一列·作战：污染体）
+	main.run.route = _fixture_route()
+	main.run.route_layer = main.run.current_layer
+	main._open_map()
+	var pol := _deep_find_button(map_page, "作战·污染体")
+	check(pol != null and not pol.disabled, "第一列作战节点当前可点")
+	pol.pressed.emit()
+	await process_frame
+	check(battle_host.get_child_count() == 1, "小怪战进入战斗位")
+	var battle: Variant = battle_host.get_child(0)
+	check(battle.state.enemy_name == "污染体" and battle.state.enemy_max_hp == 20, "小怪按节点配置")
+	battle.state.debug_force_plays = 0
+	_press_strikes_until_over(battle)
+	check(battle.state.phase == BattleState.Phase.ENDED, "小怪战打完直接结束（不过净化）")
+	await process_frame
+	check(battle_host.get_child_count() == 0, "小怪战已释放")
+	check(map_page.visible and main.run.column_index == 1, "小怪战胜利回地图、进入第二列")
+	# 第二列改选·事件（烛台走廊）
+	var candle := _deep_find_button(map_page, "事件·烛台走廊")
+	check(candle != null and not candle.disabled, "第二列事件节点当前可点")
+	candle.pressed.emit()
+	check(event_page._title.text == "烛台走廊", "第二列事件标题")
+	(event_page._choices_box.get_child(1) as Button).pressed.emit()
+	(event_page._complete_button as Button).pressed.emit()
+	check(map_page.visible and main.run.column_index == 2, "事件关走完进入第三列（层主战）")
+	# 第三列·层主战（阿斯莫德）
+	var boss_node := _deep_find_button(map_page, "层主战·阿斯莫德")
+	check(boss_node != null and not boss_node.disabled, "层主战节点当前可点")
+	boss_node.pressed.emit()
+	await process_frame
+	check(battle_host.get_child_count() == 1, "层主战进入战斗位")
+	var boss_battle: Variant = battle_host.get_child(0)
+	check(boss_battle.state.enemy_name == "阿斯莫德" and boss_battle.state.enemy_max_hp == 24, "层主按节点配置")
+	check(boss_battle.state.sin_card_id == "lust", "本场收下的罪卡＝色欲")
+	check((boss_battle.get_node("%AbsorbButton") as Button).text == "拿起 色欲", "拿起按钮按本场罪卡")
+	boss_battle.state.debug_force_plays = 0
+	_press_strikes_until_over(boss_battle)
+	check(boss_battle.state.phase == BattleState.Phase.STRIP, "打倒层主进入净化时刻")
+	var boss_overlay := boss_battle.get_node("%Overlay") as Control
+	check(boss_overlay.visible, "净化覆盖层出现")
+	check((boss_battle.get_node("%StoryText") as Label).text.contains("粉色的裙摆"), "净化时刻读白按关卡")
+	(boss_battle.get_node("%AbsorbButton") as Button).pressed.emit()
+	check(boss_battle.state.phase == BattleState.Phase.DEBRIEF, "收下后进入净化读白")
+	check((boss_battle.get_node("%StoryText") as Label).text.contains("接住"), "净化读白按关卡")
+	(boss_battle.get_node("%ContinueButton") as Button).pressed.emit()
+	check(boss_battle.state.phase == BattleState.Phase.ENDED, "层战净化读完直接结束（无三问）")
+	await process_frame
+	check(transition_page.visible, "路线走完进入上行过渡页")
+	check((transition_page._read_text as Label).text.contains("阿斯莫德"), "上行读白在屏")
+	_first_live_button(transition_page, "继续").pressed.emit()
+	check(map_page.visible, "上行后回地图")
+	check(main.run.current_layer == 3, "上行到第 3 层")
+	check(main.run.is_demo_end(), "停在 demo 边界")
+	check(main.run.chosen.is_empty() and main.run.column_index == 0, "上行后选路记录清空")
+	check(_deep_find_button(map_page, "第 2 层·色欲").text.contains("已净化"), "第 2 层已净化")
+	check(_deep_find_button(map_page, "第 3 层·暴食").text.contains("待续"), "第 3 层待续")
+	check(main.run.sin_cards == ["lust"], "色欲入局内收集")
+	check(main.run.companions.has("阿斯莫德"), "阿斯莫德入同行列")
+	check(main.pool.owned_count("lust") == 1, "罪卡入仓库")
 	viewport.queue_free()
 	await process_frame

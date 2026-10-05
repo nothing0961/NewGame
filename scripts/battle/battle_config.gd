@@ -44,9 +44,14 @@ const PRACTICE_ENEMY_NAME := "木桩"
 const PRACTICE_ENEMY_HP := 48
 
 # 罪卡规则（design/design-round1.md §1）：任务达成或第 SIN_ROUND_FALLBACK 回合保底解锁；每场战斗仅出现并使用一次
+# 任务/保底参数按卡配置（design/design-round3.md §6：按牌组中的罪卡逐卡检定）
 const SIN_CARD_ID := "wrath"
 const SIN_ROUND_FALLBACK := 8
-const SIN_TASK_ATTACK_PLAYS := 3
+const SIN_TASK_ATTACK := "attack_plays"
+const SIN_TASK_CONFIG := {
+	"wrath": {"task": SIN_TASK_ATTACK, "count": 3},
+	"lust": {"task": SIN_TASK_ATTACK, "count": 2},  # 【测试内容】占位，随第二层设计轮替换
+}
 const TEXT_SIN_TASK := "本场战斗中累计打出 %d 张攻击牌"
 const TEXT_SIN_PROGRESS := "（%d/%d）"
 const TEXT_SIN_UNLOCKED := "「%s」的封印解开了——它现在可以打出了。"
@@ -105,7 +110,11 @@ const TEXT_DISCARD := "手里的牌超出了上限（最多 %d 张）——选�
 const TEXT_PRACTICE_START := "练习开始——对面是木桩。"
 const TEXT_PRACTICE_IDLE := "木桩纹丝不动。"
 const TEXT_PRACTICE_END := "木桩倒下了。"
-const TEXT_REVIVE := "法阵亮了一下，把你拽了回来。"
+const TEXT_PRACTICE_DEFEAT := "你倒下了。练习到此结束。"  # 训练场不参与死亡规则：失败即结束，无惩罚
+# 死亡规则（design/design-round3.md §5）：生命归零＝判负，败北层＋「重新开始本层」
+const TEXT_DEFEAT := "你倒下了。手里的牌散了一地——这一层，得从头再来。"  # 【测试内容】
+const TEXT_DEFEAT_BUTTON := "重新开始本层"
+const TEXT_STAGE_WIN := "挡路的东西倒了下去。前路清楚了一些。"  # 【测试内容】层内小怪战胜利
 const TEXT_SUPPRESSED := "她没有打你，只是小声说：「……对不起。」"
 const TEXT_ENEMY_IDLE := "%s没有出牌。"
 const TEXT_ENEMY_DOMINANT := "「它」占上风。"

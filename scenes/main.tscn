@@ -1,7 +1,10 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/main_flow.gd" id="1_flow"]
 [ext_resource type="Script" path="res://scripts/ui/practice_station.gd" id="2_practice"]
+[ext_resource type="Script" path="res://scripts/ui/map_page.gd" id="3_map"]
+[ext_resource type="Script" path="res://scripts/ui/event_page.gd" id="4_event"]
+[ext_resource type="Script" path="res://scripts/ui/transition_page.gd" id="5_transition"]
 
 [node name="Main" type="Control"]
 layout_mode = 3
@@ -106,7 +109,7 @@ theme_override_constants/separation = 26
 layout_mode = 2
 mouse_filter = 2
 theme_override_font_sizes/font_size = 30
-text = "教程战"
+text = "入口菜单"
 horizontal_alignment = 1
 
 [node name="MenuContinueButton" type="Button" parent="MenuPage/MenuBox"]
@@ -249,6 +252,39 @@ custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "离开练习站"
+
+[node name="MapPage" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("3_map")
+
+[node name="EventPage" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4_event")
+
+[node name="TransitionPage" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("5_transition")
 
 [node name="BattleHost" type="Control" parent="."]
 unique_name_in_owner = true

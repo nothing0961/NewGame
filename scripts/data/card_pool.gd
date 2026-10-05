@@ -10,6 +10,13 @@ func _init() -> void:
 		owned[card_id] = int(BattleConfig.WAREHOUSE_INITIAL[card_id])
 
 
+# 收下的罪卡入仓库（design/design-round3.md §6）；罪卡唯一，重复收集不叠加
+func collect_sin(card_id: String) -> void:
+	if owned_count(card_id) > 0:
+		return
+	owned[card_id] = 1
+
+
 func owned_count(card_id: String) -> int:
 	return int(owned.get(card_id, 0))
 
@@ -22,8 +29,26 @@ func deck_count(card_id: String) -> int:
 	return count
 
 
+func is_sin_card(card_id: String) -> bool:
+	return CardDB.get_card(card_id).kind == CardData.Kind.SIN
+
+
+func sin_in_deck() -> bool:
+	for id in deck:
+		if is_sin_card(id):
+			return true
+	return false
+
+
+# 组卡约束：罪卡最多放一张（七选一的最小实现，design/design-round3.md §6）
 func can_add(card_id: String) -> bool:
-	return deck.size() < BattleConfig.DECK_SIZE and deck_count(card_id) < owned_count(card_id)
+	if deck.size() >= BattleConfig.DECK_SIZE:
+		return false
+	if deck_count(card_id) >= owned_count(card_id):
+		return false
+	if is_sin_card(card_id) and sin_in_deck():
+		return false
+	return true
 
 
 func add_to_deck(card_id: String) -> bool:
