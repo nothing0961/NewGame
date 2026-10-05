@@ -1,11 +1,15 @@
 extends SceneTree
 
+const MAIN_FLOW_SCRIPT := preload("res://scripts/ui/main_flow.gd")
+
 var failures := 0
 var _mouse_last_point := Vector2.ZERO
 
 
 func _initialize() -> void:
 	print("== 教程战逻辑测试 ==")
+	# 测试全程不触碰真实存档（user://save.json）；需要真读写的用例自行开 disabled／改 save_path 并在用例内清理
+	SaveGame.disabled = true
 	test_cards_load()
 	test_wrath_effects()
 	test_sin_unlock_rules()
@@ -41,6 +45,7 @@ func _initialize() -> void:
 	await test_battle_scene_practice()
 	await test_battle_scene_defeat()
 	await test_map_page()
+	await test_map_route_scroll()
 	await test_event_page()
 	await test_transition_page()
 	await test_scene_turn_timer()
@@ -54,7 +59,11 @@ func _initialize() -> void:
 	await test_sfx_wiring()
 	await test_main_flow_full()
 	await test_main_flow_skip_practice()
+	await test_main_menu_practice_entry()
 	await test_main_flow_layer2()
+	await test_confirm_deck_flow()
+	test_save_roundtrip()
+	await test_main_flow_save_resume()
 	if failures == 0:
 		print("== 全部通过 ==")
 		quit(0)
@@ -203,6 +212,40 @@ func _deep_find_button(node: Node, prefix: String) -> Button:
 	return null
 
 
+func _deep_find_scroll(node: Node) -> ScrollContainer:
+	if node is ScrollContainer and not node.is_queued_for_deletion():
+		return node as ScrollContainer
+	for child in node.get_children():
+		if child.is_queued_for_deletion():
+			continue
+		var found := _deep_find_scroll(child)
+		if found != null:
+			return found
+	return null
+
+
+func _deep_find_route(node: Node) -> MapPage.RouteView:
+	if node is MapPage.RouteView and not node.is_queued_for_deletion():
+		return node as MapPage.RouteView
+	for child in node.get_children():
+		if child.is_queued_for_deletion():
+			continue
+		var found := _deep_find_route(child)
+		if found != null:
+			return found
+	return null
+
+
+# 长线夹具：6 普通列×1 节点＋层主战＝7 列 1608px（＞地图页 1120 视口宽，必溢出可滚）
+func _long_route() -> Array:
+	var battles: Array = LayerConfig.LAYER2_BATTLES
+	var route: Array = []
+	for i in 6:
+		route.append([battles[i % battles.size()]])
+	route.append([LayerConfig.LAYER2_BOSS])
+	return route
+
+
 # 走拖拽路径：取牌面的拖拽数据 → 把目标区域中心换算成本场景局部坐标 → 投放
 func _drag_card_to(scene: Variant, card_button: CardButton, target: Control) -> bool:
 	var drag_data: Variant = card_button._get_drag_data(Vector2.ZERO)
@@ -257,6 +300,17 @@ func _push_mouse_motion(target: Viewport, at_point: Vector2) -> void:
 	event.global_position = at_point
 	event.relative = at_point - _mouse_last_point
 	event.button_mask = MOUSE_BUTTON_MASK_LEFT
+	_mouse_last_point = at_point
+	target.push_input(event)
+
+
+func _push_wheel(target: Viewport, at_point: Vector2, down: bool) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_WHEEL_DOWN if down else MOUSE_BUTTON_WHEEL_UP
+	event.pressed = true
+	event.factor = 1.0
+	event.position = at_point
+	event.global_position = at_point
 	_mouse_last_point = at_point
 	target.push_input(event)
 
@@ -1019,9 +1073,11 @@ func test_layer_data() -> void:
 		check(String(battle.get("type", "")) == LayerConfig.TYPE_BATTLE and String(battle.get("enemy", "")) != "" and int(battle.get("enemy_hp", 0)) > 0 and not (battle.get("enemy_deck", {}) as Dictionary).is_empty(), "作战池字段完整：" + String(battle.get("enemy", "")))
 	for event_item in LayerConfig.LAYER2_EVENTS:
 		check(String(event_item.get("title", "")) != "" and String(event_item.get("scene", "")) != "" and (event_item.get("choices", []) as Array).size() == 3 and (event_item.get("feedback", []) as Array).size() == 3, "事件池字段完整：" + String(event_item.get("title", "")))
-	# 生成器不变量（种子化批量掷路线）
+	# 生成器不变量·第 2 层细查（种子化 40 掷）：列数极值 2/4 都出现过；单图 ≤9 节点＝池容量，
+	# 全图不重复；同列必不重复
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20261005
+	var bounds2 := LayerConfig.route_length_range(2)
 	var min_cols := 99
 	var max_cols := 0
 	var min_nodes := 99
@@ -1031,7 +1087,7 @@ func test_layer_data() -> void:
 		var cols := route.size()
 		min_cols = mini(min_cols, cols)
 		max_cols = maxi(max_cols, cols)
-		check(cols >= LayerConfig.ROUTE_MIN_COLUMNS and cols <= LayerConfig.ROUTE_MAX_COLUMNS, "列数 2–4（第 %d 掷：%d 列）" % [roll, cols])
+		check(cols >= bounds2.x and cols <= bounds2.y, "第 2 层列数 2–4（第 %d 掷：%d 列）" % [roll, cols])
 		var boss_column: Array = route[cols - 1]
 		check(boss_column.size() == 1 and boss_column[0].get("boss", false), "末列＝层主战唯一节点")
 		var seen := {}
@@ -1042,12 +1098,66 @@ func test_layer_data() -> void:
 			check(column.size() >= LayerConfig.ROUTE_MIN_NODES and column.size() <= LayerConfig.ROUTE_MAX_NODES, "普通列 1–3 节点")
 			for stage in column:
 				var key := String(stage.get("enemy", stage.get("title", "")))
-				check(not seen.has(key), "全图不重复：" + key)
+				check(not seen.has(key), "第 2 层单图不重复：" + key)
 				seen[key] = true
-	check(min_cols == LayerConfig.ROUTE_MIN_COLUMNS and max_cols == LayerConfig.ROUTE_MAX_COLUMNS, "40 掷里 2 列与 4 列都出现过")
+	check(min_cols == bounds2.x and max_cols == bounds2.y, "40 掷里 2 列与 4 列都出现过")
 	check(min_nodes == LayerConfig.ROUTE_MIN_NODES and max_nodes == LayerConfig.ROUTE_MAX_NODES, "40 掷里 1 节点与 3 节点列都出现过")
-	check(LayerConfig.generate_route(1, rng).is_empty(), "教程层不走路线表")
-	check(LayerConfig.generate_route(3, rng).is_empty(), "第 3 层起内容待设计轮")
+	# 全层覆盖（第 2–8 层各 12 掷，聚合断言）：列数落该层区间、末列＝该层层主唯一节点、普通列 1–3、
+	# 同列不重复（池耗尽循环补足下仍保证）；第 3 层起为骨架占位（共用池、层主名取自层表）
+	var layer_rng := RandomNumberGenerator.new()
+	layer_rng.seed = 778899
+	for layer in range(2, LayerConfig.MAX_LAYER + 1):
+		var bounds := LayerConfig.route_length_range(layer)
+		var cols_ok := true
+		var boss_ok := true
+		var columns_ok := true
+		var no_dup := true
+		for roll in 12:
+			var route := LayerConfig.generate_route(layer, layer_rng)
+			var cols := route.size()
+			if cols < bounds.x or cols > bounds.y:
+				cols_ok = false
+			var boss_column: Array = route[cols - 1]
+			if boss_column.size() != 1 or not boss_column[0].get("boss", false) or String((boss_column[0] as Dictionary).get("enemy", "")) != LayerConfig.demon_name(layer):
+				boss_ok = false
+			for c in cols - 1:
+				var column: Array = route[c]
+				if column.size() < LayerConfig.ROUTE_MIN_NODES or column.size() > LayerConfig.ROUTE_MAX_NODES:
+					columns_ok = false
+				var col_keys := {}
+				for stage in column:
+					var key := String(stage.get("enemy", stage.get("title", "")))
+					if col_keys.has(key):
+						no_dup = false
+					col_keys[key] = true
+		check(cols_ok, "第 %d 层 12 掷列数均落 %d–%d" % [layer, bounds.x, bounds.y])
+		check(boss_ok, "第 %d 层末列均为该层层主唯一节点（%s）" % [layer, LayerConfig.demon_name(layer)])
+		check(columns_ok, "第 %d 层普通列均 1–3 节点" % layer)
+		check(no_dup, "第 %d 层同列均不重复" % layer)
+	# 池耗尽循环补足：第 8 层单图最大需求 6 列×3＝18＞池 9，30 掷里应出现超池路线
+	var big_rng := RandomNumberGenerator.new()
+	big_rng.seed = 20261005
+	var saw_over_pool := false
+	for roll in 30:
+		var route := LayerConfig.generate_route(8, big_rng)
+		var nodes := 0
+		for c in route.size() - 1:
+			nodes += (route[c] as Array).size()
+		if nodes > 9:
+			saw_over_pool = true
+	check(saw_over_pool, "第 8 层出现超池路线（循环补足不卡死）")
+	# 线随层拉长：区间表单调不降＋首尾对照
+	check(LayerConfig.route_length_range(2) == Vector2i(2, 4), "第 2 层基准 2–4 列")
+	check(LayerConfig.route_length_range(8) == Vector2i(5, 7), "第 8 层拉长到 5–7 列")
+	var monotonic := true
+	for layer in range(2, LayerConfig.MAX_LAYER):
+		var narrow := LayerConfig.route_length_range(layer)
+		var wide := LayerConfig.route_length_range(layer + 1)
+		if narrow.x > wide.x or narrow.y > wide.y:
+			monotonic = false
+	check(monotonic, "列数区间随层单调不降（每两层 +1 列）")
+	check(LayerConfig.generate_route(1, layer_rng).is_empty(), "教程层不走路线表")
+	check(LayerConfig.generate_route(9, layer_rng).is_empty(), "超出第八层返回空路线")
 	# 同种子可复现
 	var rng_a := RandomNumberGenerator.new()
 	rng_a.seed = 7
@@ -1067,7 +1177,7 @@ func test_layer_data() -> void:
 	check(not run.is_layer_unlocked(3), "第 3 层无内容仍锁定")
 	run.rng.seed = 424242
 	var generated := run.current_columns()
-	check(generated.size() >= LayerConfig.ROUTE_MIN_COLUMNS and (generated[generated.size() - 1][0] as Dictionary).get("boss", false), "首次读取生成合法路线")
+	check(generated.size() >= bounds2.x and generated.size() <= bounds2.y and (generated[generated.size() - 1][0] as Dictionary).get("boss", false), "首次读取生成合法路线")
 	check(_route_signature(run.current_columns()) == _route_signature(generated), "层内重复读取同一路线（缓存）")
 	var sig_before := _route_signature(generated)
 	check(run.column_index == 0 and not run.is_route_finished(), "开局在第一列")
@@ -1350,6 +1460,8 @@ func test_map_page() -> void:
 	print("[层地图页：三态＋当前层展开路线图（节点四态）]")
 	var page := MapPage.new()
 	var viewport := _attach_scene(page)
+	# SubViewport 不会给直接 Control 子节点自动定尺寸，手动给全屏矩形（真机里由父级布局给）
+	page.size = Vector2(1280, 720)
 	await process_frame
 	var run := RunState.new()
 	run.tutorial_done = true
@@ -1392,7 +1504,77 @@ func test_map_page() -> void:
 	check(echo_after != null and not echo_after.disabled, "推进后第二列可选")
 	var candle_after := _deep_find_button(page, "事件·烛台走廊")
 	check(candle_after != null and not candle_after.disabled, "第二列事件节点可选")
-	check(_deep_find_button(page, "返回菜单") != null and _deep_find_button(page, "进入练习站") != null, "地图底部有练习站与菜单入口")
+	check(_deep_find_button(page, "返回主菜单") != null and _deep_find_button(page, "进入练习站") != null, "地图底部有练习站与主菜单入口")
+	check(page._route_hint.text == MapPage.ROUTE_HINT, "短线（三列 648px）不出现拖动提示")
+	await process_frame
+	var short_scroll := _deep_find_scroll(page)
+	check(short_scroll != null and short_scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_SHOW_NEVER, "短线收起横向滚动条（不常显）")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_map_route_scroll() -> void:
+	print("[层地图页·路线长线：横向滚动＋拖拽/滚轮＋节点命中＋聚焦当前列]")
+	var page := MapPage.new()
+	var viewport := _attach_scene(page)
+	page.size = Vector2(1280, 720)
+	await process_frame
+	var run := RunState.new()
+	run.tutorial_done = true
+	run.route = _long_route()
+	run.route_layer = run.current_layer
+	var picks: Array = []
+	page.node_requested.connect(func(index: int) -> void: picks.append(index))
+	page.build(run)
+	await process_frame
+	await process_frame
+	var scroll := _deep_find_scroll(page)
+	check(scroll != null, "路线区包在横向滚动容器里")
+	var route := _deep_find_route(page)
+	check(route != null, "路线图在滚动容器内")
+	if scroll == null or route == null:
+		viewport.queue_free()
+		return
+	check(route._content_size.x > scroll.size.x, "长线内容宽 1608px 超视口 %.0fpx" % scroll.size.x)
+	check(page._route_hint.text == MapPage.ROUTE_HINT_SCROLL, "溢出时提示可左右拖动")
+	check(scroll.vertical_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED, "纵向不滚动（只横向拉）")
+	check(scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO, "长线横向可滚（滚动条显示）")
+	# 点击首列节点（真实鼠标事件，非 pressed.emit）
+	var pol := _deep_find_button(page, "作战·污染体")
+	check(pol != null, "首列作战节点在屏")
+	var center := pol.get_global_rect().get_center()
+	_push_mouse_button(viewport, center, true)
+	_push_mouse_button(viewport, center, false)
+	check(picks == [0], "点击节点发出 node_requested(0)")
+	# 起点压在列间隙空白处（列 0 右缘 168 与列 1 左缘 240 之间）拖动
+	var blank := route.get_global_transform() * Vector2(204.0, route.size.y / 2.0)
+	_push_mouse_button(viewport, blank, true)
+	_push_mouse_motion(viewport, blank + Vector2(-80, 0))
+	check(scroll.scroll_horizontal > 0, "空白处按住左拖＝横向拉动（scroll=%d）" % scroll.scroll_horizontal)
+	var after_drag := scroll.scroll_horizontal
+	_push_mouse_button(viewport, blank + Vector2(-80, 0), false)
+	_push_mouse_motion(viewport, blank + Vector2(-160, 0))
+	check(scroll.scroll_horizontal == after_drag, "松开后移动不再拉动")
+	# 滚动后节点仍可点中（按钮跟着内容位移）
+	center = pol.get_global_rect().get_center()
+	_push_mouse_button(viewport, center, true)
+	_push_mouse_button(viewport, center, false)
+	check(picks == [0, 0], "滚动后点节点仍命中")
+	# 滚轮＝横向拉动（事件从 PASS 按钮冒泡到路线图）
+	scroll.scroll_horizontal = 0
+	_push_wheel(viewport, pol.get_global_rect().get_center(), true)
+	check(scroll.scroll_horizontal == 180, "滚轮下滚＝右移一格（180px）")
+	_push_wheel(viewport, blank, false)
+	check(scroll.scroll_horizontal == 0, "滚轮上滚回退")
+	# 返回地图聚焦当前列：进度到第 4 列后重建，滚动位置自动带过去
+	var chosen: Array[int] = [0, 0, 0]
+	run.chosen = chosen
+	run.column_index = 3
+	page.build(run)
+	await process_frame
+	await process_frame
+	var scroll2 := _deep_find_scroll(page)
+	check(scroll2 != null and scroll2.scroll_horizontal > 0, "重建后当前列（第 4 列）自动带进视野")
 	viewport.queue_free()
 	await process_frame
 
@@ -2038,32 +2220,23 @@ func test_sfx_wiring() -> void:
 
 
 func test_main_flow_full() -> void:
-	print("[主流程：告知 → 菜单 → 教学 → 练习站组卡 → 木桩 → 转化 → 教程战 → 三问 → 菜单]")
+	print("[主流程：告知 → 教学 → 练习站组卡 → 木桩 → 转化 → 教程战 → 三问 → 层地图 → 返回主菜单]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
 	var story_page := main.get_node("%StoryPage") as Control
-	var menu_page := main.get_node("%MenuPage") as Control
 	var practice_page := main.get_node("%PracticePage") as Control
 	var battle_host := main.get_node("%BattleHost") as Control
 	var primary := main.get_node("%PrimaryButton") as Button
 	var secondary := main.get_node("%SecondaryButton") as Button
 	var story := main.get_node("%StoryText") as Label
 	check(story_page.visible, "开场在读白页")
-	check(not menu_page.visible, "开场菜单页隐藏")
 	check(story.text.contains("八层"), "召唤告知：世界是八层")
 	check(story.text.contains("清空"), "召唤告知：目标只说清空血量")
 	check(not story.text.contains("净化") and not story.text.contains("收下"), "告知边界：不提前提净化/收下")
 	check(not secondary.visible, "开场单按钮")
 	primary.pressed.emit()
-	check(menu_page.visible, "读白后进入入口菜单")
-	check(not story_page.visible, "读白页收起")
-	var menu_continue := main.get_node("%MenuContinueButton") as Button
-	var menu_practice := main.get_node("%MenuPracticeButton") as Button
-	check(menu_continue.text == "继续剧情", "未看过教学时按钮为继续剧情")
-	check(menu_practice.visible, "菜单提供练习站入口")
-	menu_continue.pressed.emit()
-	check(story_page.visible and not menu_page.visible, "继续剧情回到读白页")
-	check(story.text.contains("打击") and story.text.contains("护住"), "教学读白在屏上")
+	check(story_page.visible, "读白后不绕中间页、继续留在读白页")
+	check(story.text.contains("打击") and story.text.contains("护住"), "未看教学时「继续」＝教学读白在屏")
 	check(not story.text.contains("净化"), "教学段也不提净化")
 	check(secondary.visible, "教学页出现「直接去台阶」")
 	primary.pressed.emit()
@@ -2138,39 +2311,32 @@ func test_main_flow_full() -> void:
 	check(layer2_row != null and layer2_row.text.contains("当前"), "第 2 层当前")
 	var layer3_row := _deep_find_button(map_page, "第 3 层·暴食")
 	check(layer3_row != null and layer3_row.text.contains("待续"), "第 3 层待续")
-	var map_menu_button := _deep_find_button(map_page, "返回菜单")
-	check(map_menu_button != null, "地图有返回菜单入口")
-	map_menu_button.pressed.emit()
-	check(menu_page.visible, "地图可回入口菜单")
-	check(menu_continue.text == "继续剧情", "教程完成后菜单按钮为继续剧情")
-	menu_continue.pressed.emit()
-	check(map_page.visible, "继续剧情直达层地图")
+	var map_practice_button := _deep_find_button(map_page, "进入练习站")
+	check(map_practice_button != null, "地图保留练习站入口")
+	var map_title_button := _deep_find_button(map_page, "返回主菜单")
+	check(map_title_button != null, "地图有返回主菜单入口（原「返回菜单」）")
+	map_title_button.pressed.emit()
+	await process_frame
+	await process_frame
+	check(current_scene != null and String(current_scene.scene_file_path) == "res://scenes/main_menu.tscn", "地图返回主菜单＝切回标题页")
 	viewport.queue_free()
 	await process_frame
 
 
 func test_main_flow_skip_practice() -> void:
-	print("[主流程·跳过练习：默认卡组打教程战]")
+	print("[主流程·跳过练习：未看教学直接去台阶，用默认卡组打教程战]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
 	var story_page := main.get_node("%StoryPage") as Control
-	var menu_page := main.get_node("%MenuPage") as Control
-	var practice_page := main.get_node("%PracticePage") as Control
 	var primary := main.get_node("%PrimaryButton") as Button
 	var secondary := main.get_node("%SecondaryButton") as Button
 	var story := main.get_node("%StoryText") as Label
 	var battle_host := main.get_node("%BattleHost") as Control
+	check(not MAIN_FLOW_SCRIPT.open_practice_on_ready, "常规启动不带练习站直开标记")
 	primary.pressed.emit()
-	check(menu_page.visible, "读白后进入入口菜单")
-	# 菜单里的练习站入口随时可用：进站又原样退出（未看教学 → 回菜单）
-	(main.get_node("%MenuPracticeButton") as Button).pressed.emit()
-	check(practice_page.visible, "菜单可直达练习站")
-	(main.get_node("%LeavePracticeButton") as Button).pressed.emit()
-	check(menu_page.visible, "未看教学时退出练习站回菜单")
-	(main.get_node("%MenuContinueButton") as Button).pressed.emit()
-	check(story_page.visible, "继续剧情进入教学读白")
+	check(story_page.visible and story.text.contains("打击"), "未看教学时「继续」＝教学读白")
 	secondary.pressed.emit()
-	check(story.text.contains("清空"), "转化读白在屏上")
+	check(story.text.contains("清空"), "「直接去台阶」＝转化读白在屏")
 	primary.pressed.emit()
 	check(battle_host.get_child_count() == 1, "直接进入教程战")
 	var battle: Variant = battle_host.get_child(0)
@@ -2180,29 +2346,58 @@ func test_main_flow_skip_practice() -> void:
 	await process_frame
 
 
+func test_main_menu_practice_entry() -> void:
+	print("[主菜单练习站入口：标题页按钮直开练习站 → 离开回主菜单]")
+	var menu: Variant = (load("res://scenes/main_menu.tscn") as PackedScene).instantiate()
+	var menu_viewport := _attach_scene(menu)
+	var practice_button := menu.get_node("VBoxContainer/Button2") as Button
+	check(practice_button != null and practice_button.text == "练习站", "标题页第二按钮＝练习站（原空壳「选项」替换）")
+	practice_button.pressed.emit()
+	await process_frame
+	await process_frame
+	var live_main: Variant = current_scene
+	var reached_main := live_main != null and String(live_main.scene_file_path) == "res://scenes/main.tscn"
+	check(reached_main, "练习站按钮进入主场景")
+	if reached_main:
+		check((live_main.get_node("%PracticePage") as Control).visible, "进入即是练习站页（跳过召唤告知）")
+		check(not MAIN_FLOW_SCRIPT.open_practice_on_ready, "启动标记已消费")
+		(live_main.get_node("%LeavePracticeButton") as Button).pressed.emit()
+		await process_frame
+		await process_frame
+		check(current_scene != null and String(current_scene.scene_file_path) == "res://scenes/main_menu.tscn", "离开练习站回主菜单")
+	menu_viewport.queue_free()
+	await process_frame
+
+
 func test_main_flow_layer2() -> void:
 	print("[第二层路线全流程：夹具选路（含死亡重掷）→ 层主战 → 上行 → 地图（demo 边界）]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
-	var menu_page := main.get_node("%MenuPage") as Control
 	var map_page := main.get_node("%MapPage") as Control
 	var event_page := main.get_node("%EventPage") as Control
 	var transition_page := main.get_node("%TransitionPage") as Control
 	var battle_host := main.get_node("%BattleHost") as Control
 	await process_frame
-	# 跳过教程（教程战已由主流程测试覆盖）：直接置教程完成，从入口菜单进地图
-	(main.get_node("%PrimaryButton") as Button).pressed.emit()
+	# 跳过教程（教程战已由主流程测试覆盖）：置教程完成＋注入夹具路线（层内流程走指定节点）＋固定随机源（死亡重掷断言可复现）
 	main.run.tutorial_done = true
-	# 注入夹具路线（层内流程走指定节点）＋固定随机源（死亡重掷断言可复现）
 	main.run.route = _fixture_route()
 	main.run.route_layer = main.run.current_layer
 	main.run.rng.seed = 20261005
-	(main.get_node("%MenuContinueButton") as Button).pressed.emit()
-	check(map_page.visible, "继续剧情进入层地图")
-	# 第一列·事件（粉雾）
+	(main.get_node("%PrimaryButton") as Button).pressed.emit()
+	check(map_page.visible, "召唤告知「继续」直达层地图")
+	# 第一列·事件（粉雾）：点节点＝弹确认窗，确认主按钮才入关（design-round5.md §0.2/0.4）
+	var overlay := main.get_node("%ConfirmOverlay") as Control
+	var confirm_title := main.get_node("%ConfirmTitle") as Label
+	var confirm_primary := main.get_node("%ConfirmPrimaryButton") as Button
 	var fog := _deep_find_button(map_page, "事件·粉雾")
 	check(fog != null and not fog.disabled, "第一列事件节点当前可点")
 	fog.pressed.emit()
+	check(overlay.visible, "点节点先弹确认窗（不直接入关）")
+	check(confirm_title.text == "进入「事件·粉雾」？", "确认窗标题＝类型·名称")
+	check(confirm_primary.text == "进入事件", "事件节点主按钮＝进入事件")
+	check(main.run.column_index == 0 and main.run.chosen.is_empty(), "弹窗未落账（选择推迟到确认）")
+	confirm_primary.pressed.emit()
+	check(not overlay.visible, "确认后确认窗关闭")
 	check(event_page.visible, "进入事件页")
 	check(event_page._title.text == "粉雾", "事件标题按节点")
 	(event_page._choices_box.get_child(0) as Button).pressed.emit()
@@ -2214,6 +2409,9 @@ func test_main_flow_layer2() -> void:
 	var echo := _deep_find_button(map_page, "作战·残响回廊")
 	check(echo != null and not echo.disabled, "第二列作战节点当前可点")
 	echo.pressed.emit()
+	check(overlay.visible, "作战节点也弹确认窗")
+	check(confirm_primary.text == "开始战斗", "作战节点主按钮＝开始战斗")
+	confirm_primary.pressed.emit()
 	await process_frame
 	check(battle_host.get_child_count() == 1, "第二列作战进入战斗位")
 	var lost_battle: Variant = battle_host.get_child(0)
@@ -2238,6 +2436,8 @@ func test_main_flow_layer2() -> void:
 	var pol := _deep_find_button(map_page, "作战·污染体")
 	check(pol != null and not pol.disabled, "第一列作战节点当前可点")
 	pol.pressed.emit()
+	check(overlay.visible, "重掷后作战节点仍走确认窗")
+	confirm_primary.pressed.emit()
 	await process_frame
 	check(battle_host.get_child_count() == 1, "小怪战进入战斗位")
 	var battle: Variant = battle_host.get_child(0)
@@ -2252,6 +2452,8 @@ func test_main_flow_layer2() -> void:
 	var candle := _deep_find_button(map_page, "事件·烛台走廊")
 	check(candle != null and not candle.disabled, "第二列事件节点当前可点")
 	candle.pressed.emit()
+	check(overlay.visible, "第二列事件也弹确认窗")
+	confirm_primary.pressed.emit()
 	check(event_page._title.text == "烛台走廊", "第二列事件标题")
 	(event_page._choices_box.get_child(1) as Button).pressed.emit()
 	(event_page._complete_button as Button).pressed.emit()
@@ -2260,6 +2462,9 @@ func test_main_flow_layer2() -> void:
 	var boss_node := _deep_find_button(map_page, "层主战·阿斯莫德")
 	check(boss_node != null and not boss_node.disabled, "层主战节点当前可点")
 	boss_node.pressed.emit()
+	check(overlay.visible, "层主战也弹确认窗")
+	check(confirm_title.text == "进入「层主战·阿斯莫德」？", "层主战标题按节点")
+	confirm_primary.pressed.emit()
 	await process_frame
 	check(battle_host.get_child_count() == 1, "层主战进入战斗位")
 	var boss_battle: Variant = battle_host.get_child(0)
@@ -2292,3 +2497,165 @@ func test_main_flow_layer2() -> void:
 	check(main.pool.owned_count("lust") == 1, "罪卡入仓库")
 	viewport.queue_free()
 	await process_frame
+
+
+func test_confirm_deck_flow() -> void:
+	print("[确认窗·选择牌组：跳组卡界面 → 离开回地图重弹 → 确认入战用新卡组]")
+	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport := _attach_scene(main)
+	await process_frame
+	main.run.tutorial_done = true
+	main.run.route = _fixture_route()
+	main.run.route_layer = main.run.current_layer
+	main._open_map()
+	var map_page := main.get_node("%MapPage") as Control
+	var practice_page := main.get_node("%PracticePage") as Control
+	var overlay := main.get_node("%ConfirmOverlay") as Control
+	var confirm_title := main.get_node("%ConfirmTitle") as Label
+	var confirm_primary := main.get_node("%ConfirmPrimaryButton") as Button
+	var choose_deck := main.get_node("%ChooseDeckButton") as Button
+	var pol := _deep_find_button(map_page, "作战·污染体")
+	check(pol != null and not pol.disabled, "第一列作战节点可点")
+	pol.pressed.emit()
+	check(overlay.visible, "弹确认窗")
+	check(confirm_title.text == "进入「作战·污染体」？", "标题＝进入「类型·名称」？")
+	check(choose_deck.text == "选择牌组", "副按钮＝选择牌组（无取消键）")
+	check(main.run.chosen.is_empty() and main.run.column_index == 0, "弹窗未落账")
+	# 选择牌组 → 组卡界面（练习站）
+	choose_deck.pressed.emit()
+	check(not overlay.visible, "跳组卡时确认窗收起")
+	check(practice_page.visible, "进入组卡界面")
+	var warehouse := main.get_node("%WarehouseList") as VBoxContainer
+	check(_first_live_button(warehouse, "「打击」") != null, "组卡界面仓库在屏")
+	for i in 5:
+		var strike_button := _first_live_button(warehouse, "「打击」")
+		if strike_button != null:
+			strike_button.pressed.emit()
+	for i in 3:
+		var guard_button := _first_live_button(warehouse, "「护住」")
+		if guard_button != null:
+			guard_button.pressed.emit()
+	check((main.get_node("%DeckCountLabel") as Label).text == "卡组 8 / 8", "组卡生效（8/8）")
+	check(main.run.chosen.is_empty() and main.run.column_index == 0, "组卡期间选择仍未落账")
+	# 离开 → 回地图并重新弹出同节点确认窗
+	(main.get_node("%LeavePracticeButton") as Button).pressed.emit()
+	check(map_page.visible, "离开组卡回地图")
+	check(overlay.visible, "回地图重新弹出该节点确认窗")
+	check(confirm_title.text == "进入「作战·污染体」？", "重弹仍是原节点")
+	# 确认 → 落账入战，用刚组的卡组
+	confirm_primary.pressed.emit()
+	check(not overlay.visible, "确认后弹窗关闭")
+	check(main.run.column_index == 1 and main.run.chosen == [1], "确认落账并推进（污染体＝列内下标 1）")
+	await process_frame
+	var battle_host := main.get_node("%BattleHost") as Control
+	check(battle_host.get_child_count() == 1, "进入战斗位")
+	var battle: Variant = battle_host.get_child(0)
+	check(battle.state.enemy_name == "污染体", "按节点配置对手")
+	check(battle.state.draw_pile.size() + battle.state.hand.size() == BattleConfig.DECK_SIZE, "用组卡界面组的 8 张卡组")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_save_roundtrip() -> void:
+	print("[存档：写盘→读档→还原（进度＋卡池＋路线＋类型归一）；坏档容错]")
+	var path := "user://save_test_roundtrip.json"
+	SaveGame.disabled = false
+	SaveGame.save_path = path
+	var run := RunState.new()
+	run.tutorial_done = true
+	run.current_layer = 2
+	var chosen: Array[int] = [1]
+	run.chosen = chosen
+	run.column_index = 1
+	run.collect_sin("lust")
+	run.add_companion("贝尔芬格")
+	run.route = _fixture_route()
+	run.route_layer = 2
+	var pool := CardPool.new()
+	pool.collect_sin("lust")
+	pool.add_to_deck("strike")
+	SaveGame.save_progress(run, pool)
+	check(FileAccess.file_exists(path), "写盘成文件")
+	var data := SaveGame.load_progress()
+	check(not data.is_empty(), "读档非空")
+	var run2 := RunState.new()
+	var pool2 := CardPool.new()
+	SaveGame.apply_progress(data, run2, pool2)
+	check(run2.tutorial_done and run2.current_layer == 2, "进度还原")
+	check(run2.column_index == 1 and run2.chosen == [1], "选路还原")
+	check(run2.sin_cards == ["lust"] and run2.companions == ["贝尔芬格"], "收集还原")
+	check(pool2.owned_count("lust") == 1, "仓库罪卡还原")
+	check(pool2.deck == ["strike"], "卡组还原")
+	check(_route_signature(run2.route) == _route_signature(_fixture_route()), "路线还原")
+	check(run2.route_layer == 2 and run2.current_columns() == run2.route, "路线层号还原且不重生成")
+	var battle_node: Dictionary = run2.route[0][1]
+	check(typeof(battle_node.get("enemy_hp")) == TYPE_INT, "节点血量回读为 int（JSON float 已归一）")
+	var enemy_deck: Dictionary = battle_node.get("enemy_deck", {})
+	check(typeof(enemy_deck.get("enemy_strike")) == TYPE_INT, "敌方卡组计数回读为 int")
+	# 教程未过不写盘
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.save_progress(RunState.new(), CardPool.new())
+	check(not FileAccess.file_exists(path), "教程未过不写盘")
+	# 坏档容错
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string("{ 不是合法 JSON")
+	file.close()
+	check(SaveGame.load_progress().is_empty(), "坏档拒载（空字典）")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.save_path = SaveGame.DEFAULT_SAVE_PATH
+	SaveGame.disabled = true
+
+
+func test_main_flow_save_resume() -> void:
+	print("[存档启动：教程完成写盘 → 重启直达路线 → 走一步再重启续到该列]")
+	var path := "user://save_test_resume.json"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.disabled = false
+	SaveGame.save_path = path
+	# 一：无档启动（从召唤告知走）→ 教程收尾即落盘
+	var main1: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport1 := _attach_scene(main1)
+	await process_frame
+	check((main1.get_node("%StoryPage") as Control).visible, "无档启动照旧走召唤告知")
+	main1._finish_tutorial()
+	check(FileAccess.file_exists(path), "教程完成即写盘")
+	viewport1.queue_free()
+	await process_frame
+	# 二：重启直达路线（跳过召唤告知）
+	var main2: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport2 := _attach_scene(main2)
+	await process_frame
+	var map2 := main2.get_node("%MapPage") as Control
+	check(map2.visible and not (main2.get_node("%StoryPage") as Control).visible, "有档启动直达路线")
+	check(main2.run.tutorial_done and main2.run.companions.has("贝尔芬格"), "进度还原")
+	check(not (main2.get_node("%ConfirmOverlay") as Control).visible, "直达不出弹窗")
+	# 三：走一步（事件）→ 自动存盘 → 再重启续到第二列
+	main2.run.route = _fixture_route()
+	main2.run.route_layer = main2.run.current_layer
+	main2._open_map()
+	var fog2 := _deep_find_button(map2, "事件·粉雾")
+	check(fog2 != null and not fog2.disabled, "续玩：第一列节点可点")
+	fog2.pressed.emit()
+	(main2.get_node("%ConfirmPrimaryButton") as Button).pressed.emit()
+	var event_page2 := main2.get_node("%EventPage") as Control
+	check(event_page2.visible, "确认后进入事件页")
+	(event_page2._choices_box.get_child(0) as Button).pressed.emit()
+	(event_page2._complete_button as Button).pressed.emit()
+	check(main2.run.column_index == 1, "走完一步推进到第二列")
+	viewport2.queue_free()
+	await process_frame
+	var main3: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport3 := _attach_scene(main3)
+	await process_frame
+	var map3 := main3.get_node("%MapPage") as Control
+	check(map3.visible, "再重启仍直达路线")
+	check(main3.run.column_index == 1 and main3.run.chosen == [0], "中途进度续到第二列")
+	var fog3 := _deep_find_button(map3, "事件·粉雾")
+	check(fog3 != null and fog3.text.contains("✓"), "已走节点续档后标 ✓")
+	var echo3 := _deep_find_button(map3, "作战·残响回廊")
+	check(echo3 != null and not echo3.disabled, "第二列续档后可直接继续")
+	viewport3.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.save_path = SaveGame.DEFAULT_SAVE_PATH
+	SaveGame.disabled = true

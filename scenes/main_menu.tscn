@@ -55,7 +55,7 @@ text = "开始游戏"
 [node name="Button2" type="Button" parent="VBoxContainer" unique_id=1205463596]
 layout_mode = 2
 theme_override_font_sizes/font_size = 40
-text = "选项"
+text = "练习站"
 
 [node name="Button3" type="Button" parent="VBoxContainer" unique_id=1163835253]
 layout_mode = 2
@@ -63,5 +63,5 @@ theme_override_font_sizes/font_size = 40
 text = "退出游戏"
 
 [connection signal="pressed" from="VBoxContainer/Button" to="." method="_on_button_pressed"]
-[connection signal="pressed" from="VBoxContainer/Button2" to="." method="_on_button_2_pressed"]
+[connection signal="pressed" from="VBoxContainer/Button2" to="." method="_on_practice_pressed"]
 [connection signal="pressed" from="VBoxContainer/Button3" to="." method="_on_button_3_pressed"]

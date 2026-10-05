@@ -2,7 +2,10 @@ extends Control
 
 const BATTLE_SCENE := preload("res://scenes/battle.tscn")
 
-enum Page { STORY, MENU, PRACTICE, BATTLE, MAP, EVENT, TRANSITION }
+enum Page { STORY, PRACTICE, BATTLE, MAP, EVENT, TRANSITION }
+
+# 主菜单「练习站」入口标记：主菜单置位 → 本场景 _ready 消费后直开练习站（离开时回主菜单）
+static var open_practice_on_ready := false
 
 @onready var story_page: Control = %StoryPage
 @onready var story_text: Label = %StoryText
@@ -10,13 +13,13 @@ enum Page { STORY, MENU, PRACTICE, BATTLE, MAP, EVENT, TRANSITION }
 @onready var secondary_button: Button = %SecondaryButton
 @onready var battle_host: Control = %BattleHost
 @onready var practice_page = %PracticePage
-@onready var menu_page: Control = %MenuPage
-@onready var menu_continue_button: Button = %MenuContinueButton
-@onready var menu_practice_button: Button = %MenuPracticeButton
-@onready var menu_restart_button: Button = %MenuRestartButton
 @onready var map_page: MapPage = %MapPage
 @onready var event_page: EventPage = %EventPage
 @onready var transition_page: TransitionPage = %TransitionPage
+@onready var confirm_overlay: Control = %ConfirmOverlay
+@onready var confirm_title: Label = %ConfirmTitle
+@onready var confirm_primary_button: Button = %ConfirmPrimaryButton
+@onready var choose_deck_button: Button = %ChooseDeckButton
 
 var pool := CardPool.new()
 var run := RunState.new()
@@ -26,39 +29,44 @@ var _practice_return: Callable = Callable()
 var _teach_seen := false
 var _battle_context := ""  # "tutorial" / "story" / "practice"
 var _battle: Control = null
+# 确认窗待定节点：点节点只备忘，确认主按钮才 choose 落账（design-round5.md §0.4）
+var _pending_node_index := -1
+var _pending_stage: Dictionary = {}
 
 
 func _ready() -> void:
 	practice_page.setup(pool)
 	practice_page.start_practice_requested.connect(_on_practice_start_requested)
 	practice_page.leave_requested.connect(_on_practice_leave_requested)
-	menu_continue_button.pressed.connect(_on_continue_story_pressed)
-	menu_practice_button.pressed.connect(_open_practice_from_menu)
-	menu_restart_button.pressed.connect(_restart)
 	map_page.node_requested.connect(_on_map_node_requested)
 	map_page.practice_requested.connect(_open_practice_from_map)
-	map_page.menu_requested.connect(_show_entry_menu)
+	map_page.menu_requested.connect(_return_to_title)
 	event_page.completed.connect(_on_event_completed)
 	transition_page.continued.connect(_open_map)
-	_show_intro()
+	confirm_primary_button.pressed.connect(_on_confirm_primary)
+	choose_deck_button.pressed.connect(_on_confirm_deck)
+	if open_practice_on_ready:
+		open_practice_on_ready = false
+		_practice_return = _return_to_title
+		_open_practice()
+	else:
+		# 进度存档：教程已过＝直达路线（design-round5.md §0.1）
+		if not SaveGame.disabled:
+			var data := SaveGame.load_progress()
+			if not data.is_empty():
+				SaveGame.apply_progress(data, run, pool)
+		if run.tutorial_done:
+			_open_map()
+		else:
+			_show_intro()
 
 
 func _show_intro() -> void:
-	_show_story(BattleConfig.TEXT_INTRO, "继续", _show_entry_menu)
+	_show_story(BattleConfig.TEXT_INTRO, "继续", _continue_story)
 
 
-# 入口页：练习站独立于剧情，随时可进
-func _show_entry_menu() -> void:
-	if run.tutorial_done:
-		menu_continue_button.text = "继续剧情"
-	elif _teach_seen:
-		menu_continue_button.text = "继续剧情（前往台阶）"
-	else:
-		menu_continue_button.text = "继续剧情"
-	_show_page(Page.MENU)
-
-
-func _on_continue_story_pressed() -> void:
+# 告知「继续」按进度直达：教程完成→层地图；看过教学→转化段；未看→教学说明（入口菜单页已废除）
+func _continue_story() -> void:
 	if run.tutorial_done:
 		_open_map()
 	elif _teach_seen:
@@ -70,11 +78,6 @@ func _on_continue_story_pressed() -> void:
 func _show_teach() -> void:
 	_teach_seen = true
 	_show_story(BattleConfig.TEXT_TEACH, "去练习站", _open_practice_from_teach, "直接去台阶", _show_transform)
-
-
-func _open_practice_from_menu() -> void:
-	_practice_return = _show_entry_menu
-	_open_practice()
 
 
 func _open_practice_from_teach() -> void:
@@ -98,10 +101,11 @@ func _on_practice_start_requested() -> void:
 
 
 func _on_practice_leave_requested() -> void:
+	SaveGame.save_progress(run, pool)
 	if _practice_return.is_valid():
 		_practice_return.call()
 	else:
-		_show_entry_menu()
+		_return_to_title()
 
 
 func _show_transform() -> void:
@@ -116,8 +120,8 @@ func _start_tutorial_battle() -> void:
 	_start_battle(BattleState.Mode.TUTORIAL, deck)
 
 
-func _restart() -> void:
-	get_tree().reload_current_scene()
+func _return_to_title() -> void:
+	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 
 
 # —— 层循环（design/design-round3.md）——
@@ -127,9 +131,42 @@ func _open_map() -> void:
 	_show_page(Page.MAP)
 
 
-# 选路即入关：choose() 记录选择并推进当前列（design-round4.md §1）
+# 点节点＝弹确认窗（不直接入关）；choose 落账推迟到确认主按钮（design-round5.md §0.2/0.4）
 func _on_map_node_requested(index: int) -> void:
+	var column := run.current_column()
+	if index < 0 or index >= column.size():
+		return
+	_pending_node_index = index
+	_pending_stage = column[index]
+	_show_confirm_dialog()
+
+
+func _show_confirm_dialog() -> void:
+	var is_battle := String(_pending_stage.get("type", "")) == LayerConfig.TYPE_BATTLE
+	confirm_title.text = "进入「%s」？" % LayerConfig.node_label(_pending_stage)
+	confirm_primary_button.text = "开始战斗" if is_battle else "进入事件"
+	confirm_overlay.visible = true
+
+
+func _on_confirm_primary() -> void:
+	confirm_overlay.visible = false
+	var index := _pending_node_index
+	_pending_node_index = -1
+	_pending_stage = {}
 	_enter_stage(run.choose(index))
+
+
+# 「选择牌组」＝跳练习站组卡；离开后回地图并重新弹同节点确认窗（pending 保留、未落账）
+func _on_confirm_deck() -> void:
+	confirm_overlay.visible = false
+	_practice_return = _return_from_deck_edit
+	_open_practice()
+
+
+func _return_from_deck_edit() -> void:
+	_open_map()
+	if _pending_node_index >= 0:
+		_show_confirm_dialog()
 
 
 func _enter_stage(stage: Dictionary) -> void:
@@ -151,7 +188,7 @@ func _on_event_completed() -> void:
 	_after_route_step()
 
 
-# 一步走完：路线走完＝层完成（上行过渡），否则回地图继续选路
+# 一步走完：路线走完＝层完成（上行过渡），否则回地图继续选路；走完即存盘（design-round5.md §1）
 func _after_route_step() -> void:
 	if run.is_route_finished():
 		var layer := run.current_layer
@@ -159,6 +196,7 @@ func _after_route_step() -> void:
 		_show_transition(LayerConfig.transition_lines(layer))
 	else:
 		_open_map()
+	SaveGame.save_progress(run, pool)
 
 
 func _start_battle(mode: int, deck: Array, stage: Dictionary = {}) -> void:
@@ -201,6 +239,7 @@ func _on_battle_ended(practice: bool) -> void:
 func _finish_tutorial() -> void:
 	run.tutorial_done = true
 	run.add_companion(LayerConfig.demon_name(LayerConfig.TUTORIAL_LAYER))
+	SaveGame.save_progress(run, pool)
 	_show_transition(BattleConfig.TEXT_ENDING)
 
 
@@ -219,6 +258,7 @@ func _on_battle_lost() -> void:
 		# 死亡回层首＝回第一列重新选路（design-round4.md §0）
 		run.reset_layer()
 		_open_map()
+		SaveGame.save_progress(run, pool)
 
 
 func _show_transition(lines: Array) -> void:
@@ -255,7 +295,6 @@ func _disconnect_button(button: Button, previous: Callable) -> Callable:
 
 func _show_page(page: int) -> void:
 	story_page.visible = page == Page.STORY
-	menu_page.visible = page == Page.MENU
 	practice_page.visible = page == Page.PRACTICE
 	map_page.visible = page == Page.MAP
 	event_page.visible = page == Page.EVENT

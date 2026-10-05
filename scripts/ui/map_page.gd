@@ -15,9 +15,12 @@ const COLOR_CURRENT := Color(1.0, 0.93, 0.72)
 const COLOR_LOCKED := Color(0.5, 0.49, 0.58)
 
 const ROUTE_HINT := "每列选一个节点前进"
+# 长线（随层拉长）溢出可视区时的提示（design-round4.md §4）
+const ROUTE_HINT_SCROLL := "每列选一个节点前进　（可左右拖动查看全图）"
 
 var _list: VBoxContainer
 var _toast: Label
+var _route_hint: Label
 
 
 func _ready() -> void:
@@ -55,7 +58,7 @@ func _build_static_ui() -> void:
 	practice_button.pressed.connect(func() -> void: practice_requested.emit())
 	buttons.add_child(practice_button)
 	var menu_button := Button.new()
-	menu_button.text = "返回菜单"
+	menu_button.text = "返回主菜单"
 	menu_button.custom_minimum_size = Vector2(180, 44)
 	menu_button.pressed.connect(func() -> void: menu_requested.emit())
 	buttons.add_child(menu_button)
@@ -104,20 +107,29 @@ func _make_layer_row(layer: int, run_state: RunState) -> Control:
 	return button
 
 
-# 当前层展开：分支路线图（每列一步、列内节点选一；层主战＝最后一列）
+# 当前层展开：分支路线图（每列一步、列内节点选一；层主战＝最后一列）。
+# 线随层拉长后可超页宽——包横向滚动容器（拖空白处/滚轮，design-round4.md §4）。
 func _make_route_section(run_state: RunState) -> Control:
 	var section := VBoxContainer.new()
 	section.alignment = BoxContainer.ALIGNMENT_CENTER
 	section.add_theme_constant_override("separation", 6)
-	var hint := Label.new()
-	hint.text = ROUTE_HINT
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 14)
-	hint.add_theme_color_override("font_color", COLOR_LOCKED)
-	section.add_child(hint)
+	_route_hint = Label.new()
+	_route_hint.text = ROUTE_HINT
+	_route_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_route_hint.add_theme_font_size_override("font_size", 14)
+	_route_hint.add_theme_color_override("font_color", COLOR_LOCKED)
+	section.add_child(_route_hint)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	section.add_child(scroll)
 	var route := RouteView.new(run_state)
 	route.node_pressed.connect(func(index: int) -> void: node_requested.emit(index))
-	section.add_child(route)
+	route.overflow_changed.connect(func(overflow: bool) -> void:
+		_route_hint.text = ROUTE_HINT_SCROLL if overflow else ROUTE_HINT)
+	scroll.add_child(route)
+	# 返回地图时把当前列带进视野（长线不必每次手动拖）
+	route.focus_column(run_state.column_index)
 	return section
 
 
@@ -134,10 +146,13 @@ func _hide_toast() -> void:
 
 # 路线图呈现：横向列、列内节点竖排（借《明日方舟》集成战略节点图语法，design-round4.md）。
 # 仅当前列节点可点；列间连线三色：已走＝金线／当前列出发＝淡紫线／其余＝暗线。
+# 线随层拉长（design-round4.md §4）：父级为横向滚动容器时——内容不足视口宽＝撑满居中，
+# 超出＝按内容宽可滚；空白处按住拖动／滚轮横向滚动；返回地图时聚焦当前列。
 class RouteView extends Control:
 	const NODE_SIZE := Vector2(168, 40)
 	const NODE_GAP_Y := 10
 	const COLUMN_GAP_X := 72
+	const WHEEL_STEP := 180.0
 
 	const LINE_TAKEN := Color(0.96, 0.86, 0.62, 0.85)
 	const LINE_OPEN := Color(0.66, 0.63, 0.78, 0.55)
@@ -153,12 +168,17 @@ class RouteView extends Control:
 	const BORDER_CURRENT := Color(0.78, 0.7, 1.0, 0.9)
 
 	signal node_pressed(index: int)
+	signal overflow_changed(overflow: bool)
 
 	var _run: RunState
 	var _columns: Array
 	var _nodes: Array = []
 	var _content_size := Vector2.ZERO
 	var _max_col_h := 0.0
+	var _scroll: ScrollContainer = null
+	var _overflowing := false
+	var _focus_pending := -1
+	var _dragging := false
 
 	func _init(run_state: RunState) -> void:
 		_run = run_state
@@ -166,6 +186,83 @@ class RouteView extends Control:
 		_build_nodes()
 		resized.connect(_layout)
 		_layout()
+
+	func _ready() -> void:
+		_scroll = get_parent() as ScrollContainer
+		if _scroll != null:
+			_scroll.resized.connect(_update_min_size)
+			# 视口宽变化（初次撑开/窗口缩放）也要重判溢出：路线自身尺寸可能不变，不会触发 _layout
+			_scroll.resized.connect(_refresh_overflow)
+		_update_min_size()
+
+	# 内容不足视口宽→撑满视口（内部居中）；超出→按内容宽（可横向滚动）
+	func _update_min_size() -> void:
+		var want := _content_size.x
+		if _scroll != null:
+			want = maxf(want, _scroll.size.x)
+		if absf(custom_minimum_size.x - want) > 0.5:
+			custom_minimum_size.x = want
+
+	# 请求初始把第 c 列带进视野。容器排序逐级级联（本帧内滚动条尺寸与 range 均未就绪），
+	# 用 _process 等下一帧布局稳定后一次性应用
+	func focus_column(c: int) -> void:
+		_focus_pending = maxi(0, c)
+		set_process(true)
+
+	func _process(_delta: float) -> void:
+		if _focus_pending < 0:
+			set_process(false)
+			return
+		if _scroll == null or _scroll.size.x <= 0.0:
+			return
+		var col_x := _center_offset().x + _focus_pending * (NODE_SIZE.x + COLUMN_GAP_X)
+		var view := _scroll.size.x
+		var want := clampf(col_x - (view - NODE_SIZE.x) / 2.0, 0.0, maxf(0.0, _content_size.x - view))
+		_scroll.scroll_horizontal = int(want)
+		_focus_pending = -1
+		set_process(false)
+
+	func _refresh_overflow() -> void:
+		var view := size.x
+		if _scroll != null:
+			view = _scroll.size.x
+		if view <= 0.5:
+			return
+		var overflow := _content_size.x > view + 0.5
+		# 横向滚动条交给本判定统一裁决：AUTO 模式下 Godot 会把「内容恰撑满容器」按滚动条
+		# 主题边距（实测差 4px）误判为可滚、短线也常显滚动条；无溢出时 SHOW_NEVER 收回
+		# （DISABLED 会按内容尺寸传播不滚轴尺寸，与撑满用的 min 宽互相顶成 400000，勿用）
+		if _scroll != null:
+			_scroll.horizontal_scroll_mode = (ScrollContainer.SCROLL_MODE_AUTO if overflow
+					else ScrollContainer.SCROLL_MODE_SHOW_NEVER)
+		if overflow != _overflowing:
+			_overflowing = overflow
+			overflow_changed.emit(overflow)
+
+	# 空白处按下拖动／滚轮＝横向拉动（节点按钮本体的按下会被按钮消费，拖动只从空白起手；
+	# 按钮为 PASS，滚轮事件冒泡到这里）
+	func _gui_input(event: InputEvent) -> void:
+		if _scroll == null:
+			return
+		if event is InputEventMouseButton:
+			var button_event := event as InputEventMouseButton
+			if button_event.button_index == MOUSE_BUTTON_LEFT:
+				_dragging = button_event.pressed
+				if button_event.pressed:
+					accept_event()
+			elif button_event.pressed and button_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_scroll.scroll_horizontal += int(WHEEL_STEP)
+				accept_event()
+			elif button_event.pressed and button_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_scroll.scroll_horizontal -= int(WHEEL_STEP)
+				accept_event()
+		elif event is InputEventMouseMotion:
+			var motion := event as InputEventMouseMotion
+			if (motion.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
+				_dragging = false
+			elif _dragging:
+				_scroll.scroll_horizontal -= int(motion.relative.x)
+				accept_event()
 
 	func _build_nodes() -> void:
 		var max_nodes := 1
@@ -187,16 +284,12 @@ class RouteView extends Control:
 	func _make_node_button(c: int, n: int) -> Button:
 		var state := _run.node_state(c, n)
 		var stage: Dictionary = _columns[c][n]
-		var type_label := "事件"
-		if stage.get("boss", false):
-			type_label = "层主战"
-		elif String(stage.get("type", "")) == LayerConfig.TYPE_BATTLE:
-			type_label = "作战"
-		var node_name := String(stage.get("enemy", stage.get("title", "")))
-		var label := "%s·%s" % [type_label, node_name]
+		var label := LayerConfig.node_label(stage)
 		var button := Button.new()
 		button.add_theme_font_size_override("font_size", 15)
 		button.custom_minimum_size = NODE_SIZE
+		# PASS：未处理的滚轮/移动事件冒泡到 RouteView（横向滚动用）
+		button.mouse_filter = Control.MOUSE_FILTER_PASS
 		button.add_theme_stylebox_override("disabled", _make_box(BOX_BG, BORDER_DIM))
 		match state:
 			RunState.NodeState.DONE:
@@ -247,6 +340,7 @@ class RouteView extends Control:
 				button.position = _base_position(c, n) + offset
 				button.size = NODE_SIZE
 		queue_redraw()
+		_refresh_overflow()
 
 	func _draw() -> void:
 		var offset := _center_offset()

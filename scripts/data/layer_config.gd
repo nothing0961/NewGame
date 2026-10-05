@@ -1,12 +1,12 @@
 class_name LayerConfig
 extends RefCounted
 
-# 层循环数据（design/design-round3.md；层内路线图＋分支随机化见 design/design-round4.md，定案 2026-10-05）。
+# 层循环数据（design/design-round3.md；层内路线图＋分支随机化＋拉长/横滚见 design/design-round4.md，定案 2026-10-05）。
 # 层＝分支路线图：若干「列」（每列＝一步），列内多节点选一；层主战＝最后一列（净化的唯一发生点）。
-# 路线进层随机生成（generate_route）：列数随机、节点从池抽取（同一张地图内不重复）；死亡重掷。
+# 路线进层随机生成（generate_route）：总列数随层数拉长、节点从占位池抽取；死亡重掷。
 # 第 1 层（懒惰·贝尔芬格）＝教程层特化编排，不走本表路线；
 # 第 2 层＝可玩占位（本文件全部文本/数值＝【测试内容】，第二层设计轮整体替换）；
-# 第 3 层起只有层名/恶魔名，内容待各层设计轮。
+# 第 3–8 层＝骨架占位路线（共用占位池、层主名取自层表），实际可玩内容边界＝LAST_PLAYABLE_LAYER。
 
 const TUTORIAL_LAYER := 1
 const MAX_LAYER := 8
@@ -16,9 +16,18 @@ const LAST_PLAYABLE_LAYER := 2
 const TYPE_BATTLE := "battle"
 const TYPE_EVENT := "event"
 
-# 路线形状（【测试内容】占位口径）：列数 2–4（含末列层主战），普通列每列 1–3 节点
-const ROUTE_MIN_COLUMNS := 2
-const ROUTE_MAX_COLUMNS := 4
+# 路线长度随层数拉长【用户定 2026-10-05「线要拉长」；数值＝【测试内容】占位，各层设计轮可调】：
+# 总列数区间（含末列层主战）——每两层 +1 列：第 2–3 层 2–4 · 第 4–5 层 3–5 · 第 6–7 层 4–6 · 第 8 层 5–7
+const ROUTE_LENGTH := {
+	2: Vector2i(2, 4),
+	3: Vector2i(2, 4),
+	4: Vector2i(3, 5),
+	5: Vector2i(3, 5),
+	6: Vector2i(4, 6),
+	7: Vector2i(4, 6),
+	8: Vector2i(5, 7),
+}
+# 每列节点数（分支上限 3）
 const ROUTE_MIN_NODES := 1
 const ROUTE_MAX_NODES := 3
 
@@ -33,8 +42,9 @@ const LAYERS := {
 	8: {"name": "同位体", "demon": "贝嘉"},
 }
 
-# 第 2 层占位池（【测试内容】；第二层设计轮整体替换）——作战 4＋事件 5＝9 个普通节点，
-# ≥ 单图最大需求（3 普通列 × 最多 3 节点＝9），保证「全图不重复抽取」不耗尽
+# 占位池（【测试内容】；第二层设计轮整体替换）——作战 4＋事件 5＝9 个普通节点。
+# 第 2 层最大需求 3 普通列 ×3＝9＝池容量（全图不重复）；
+# 更高层线拉长后可超池（最大 6 普通列 ×3＝18），抽取「池耗尽后循环补足」（design-round4.md §4.5）。
 const LAYER2_BATTLES := [
 	{
 		"type": "battle",
@@ -149,6 +159,12 @@ const LAYER2_TRANSITION := [
 ]
 
 
+# 各层路线总列数区间（含末列层主战）；表外（含教程层）回退第 2 层基准
+static func route_length_range(layer: int) -> Vector2i:
+	var bounds: Vector2i = ROUTE_LENGTH.get(layer, ROUTE_LENGTH[2])
+	return bounds
+
+
 static func layer_name(layer: int) -> String:
 	return String(LAYERS.get(layer, {}).get("name", ""))
 
@@ -157,27 +173,64 @@ static func demon_name(layer: int) -> String:
 	return String(LAYERS.get(layer, {}).get("demon", ""))
 
 
-# 进层随机生成路线：普通列 1–3 个（列数 2–4 含末列）＋末列层主战唯一节点；层无内容＝空路线。
-# 战斗/事件从池洗牌后顺序取——同一张地图内不重复（池规模 ≥ 最大需求，见池注释）。
+# 节点显示名「类型·名称」（地图节点按钮与确认窗标题共用；design-round5.md §1）
+static func node_label(stage: Dictionary) -> String:
+	var type_label := "事件"
+	if stage.get("boss", false):
+		type_label = "层主战"
+	elif String(stage.get("type", "")) == TYPE_BATTLE:
+		type_label = "作战"
+	var node_name := String(stage.get("enemy", stage.get("title", "")))
+	return "%s·%s" % [type_label, node_name]
+
+
+# 进层随机生成路线：总列数＝route_length_range(layer)（随层拉长；末列＝层主战唯一节点），
+# 普通列每列 1–3 节点（分支上限 3）。节点从占位池洗牌后顺序取：同列必不重复；全图尽量不重复，
+# 池耗尽后循环补足（层高线长时需求可超池）。教程层／表外层＝空路线。
 static func generate_route(layer: int, rng: RandomNumberGenerator) -> Array:
-	if layer != 2:
+	if layer == TUTORIAL_LAYER or layer > MAX_LAYER:
 		return []
 	var pool: Array = []
 	pool.append_array(LAYER2_BATTLES)
 	pool.append_array(LAYER2_EVENTS)
+	var bounds := route_length_range(layer)
+	var normal_columns := rng.randi_range(bounds.x, bounds.y) - 1
 	var order := _shuffled_indices(pool.size(), rng)
 	var cursor := 0
-	var normal_columns := rng.randi_range(ROUTE_MIN_COLUMNS - 1, ROUTE_MAX_COLUMNS - 1)
+	var used := {}
 	var route: Array = []
 	for c in normal_columns:
 		var node_count := rng.randi_range(ROUTE_MIN_NODES, ROUTE_MAX_NODES)
 		var column: Array = []
+		var column_indices: Array[int] = []
 		for n in node_count:
-			column.append(pool[order[cursor]])
-			cursor += 1
+			if used.size() >= pool.size():
+				used.clear()
+			while true:
+				var index: int = order[cursor % order.size()]
+				cursor += 1
+				if column_indices.has(index) or used.has(index):
+					continue
+				used[index] = true
+				column_indices.append(index)
+				column.append(pool[index])
+				break
 		route.append(column)
-	route.append([LAYER2_BOSS])
+	route.append([_boss_node(layer)])
 	return route
+
+
+# 末列层主：第 2 层为已编排占位；第 3 层起＝骨架（名取自层表，净化段/罪卡待各层设计轮）
+static func _boss_node(layer: int) -> Dictionary:
+	if layer == 2:
+		return LAYER2_BOSS
+	return {
+		"type": "battle",
+		"enemy": demon_name(layer),
+		"enemy_hp": 24,
+		"enemy_deck": {"enemy_strike": 8},
+		"boss": true,
+	}
 
 
 # Fisher–Yates 洗牌（用注入的 rng，保证同种子可复现）
