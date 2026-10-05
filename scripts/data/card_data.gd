@@ -36,5 +36,6 @@ func kind_label() -> String:
 		Kind.SIN:
 			return "罪"
 		Kind.AMPLIFY:
-			return "增幅"
+			# 呈现层并入功能类（黄框）：机制不变，标签统一显示「功能」
+			return "功能"
 	return ""

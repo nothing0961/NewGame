@@ -16,7 +16,7 @@ const HIGHLIGHT_DROPPABLE_BORDER := Color(0.72, 0.84, 1.0, 1.0)
 const FAN_STEP_MAX := 118.0
 const FAN_STEP_MIN := 42.0
 const FAN_PAD := 10.0
-const FAN_CARD_SIZE := Vector2(118, 142)
+const FAN_CARD_SIZE := CardButton.CARD_SIZE
 const FAN_BOTTOM_MARGIN := 12.0
 
 const SFX_DIR := "res://assets/audio/sfx/"
@@ -234,7 +234,7 @@ func _rebuild_play_zone() -> void:
 			var card: CardData = state.staged[i]
 			var card_button := CardButton.new()
 			card_button.setup(card)
-			card_button.text = "%s\n\n（点击收回）" % card.display_name
+			card_button.set_hint("（点击收回）")
 			if card.is_merged():
 				card_button.tooltip_text = "点击拆开收回原牌（共 %d 张），或拖回手牌区" % card.parts.size()
 			else:
@@ -249,7 +249,7 @@ func _rebuild_play_zone() -> void:
 			slot.text = "空位"
 			slot.disabled = true
 			slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			slot.custom_minimum_size = Vector2(118, 96)
+			slot.custom_minimum_size = FAN_CARD_SIZE
 			slot.add_theme_font_size_override("font_size", 13)
 			var slot_style := StyleBoxFlat.new()
 			slot_style.bg_color = Color(0.1, 0.095, 0.14, 0.4)

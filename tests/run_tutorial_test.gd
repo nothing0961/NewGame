@@ -124,8 +124,15 @@ func _check_cost_label(scene: Variant, cost_text: String, message: String) -> vo
 
 func _first_live_button(container: Node, prefix: String) -> Button:
 	for child in container.get_children():
-		if child is Button and not child.is_queued_for_deletion() and (child as Button).text.contains(prefix):
-			return child
+		if not child is Button or child.is_queued_for_deletion():
+			continue
+		var button := child as Button
+		# 卡牌按钮的文字画在自绘子节点里（Button.text 为空），按卡名匹配
+		if button is CardButton:
+			if (button as CardButton).card != null and (button as CardButton).card.display_name.contains(prefix):
+				return button
+		elif button.text.contains(prefix):
+			return button
 	return null
 
 
@@ -234,7 +241,7 @@ func test_cards_load() -> void:
 	check(CardDB.get_card("quench").kind == CardData.Kind.AMPLIFY, "淬火是增幅牌")
 	check(CardDB.get_card("surge").kind == CardData.Kind.AMPLIFY, "蓄能是增幅牌")
 	check(CardDB.get_card("bulwark").kind == CardData.Kind.AMPLIFY, "筑壁是增幅牌")
-	check(CardDB.get_card("quench").kind_label() == "增幅", "卡型标签：增幅")
+	check(CardDB.get_card("quench").kind_label() == "功能", "卡型标签：增幅呈现并入功能")
 	check(CardDB.get_card("quench").cost == 1, "增幅牌 Cost 1")
 	check(CardDB.get_card("heavy_strike").kind_label() == "攻击", "卡型标签：攻击")
 	check(CardDB.get_card("shift").kind_label() == "功能", "卡型标签：功能")
@@ -711,7 +718,7 @@ func test_card_pool() -> void:
 	var pool_total := 0
 	for card_id in BattleConfig.WAREHOUSE_INITIAL:
 		pool_total += int(BattleConfig.WAREHOUSE_INITIAL[card_id])
-	check(pool_total == 20, "仓库初始卡池共 20 张（攻击 7＋防御 5＋功能 4＋增幅 4）")
+	check(pool_total == 20, "仓库初始卡池共 20 张（攻击 7＋防御 5＋功能 8［含增幅 4］）")
 	check(pool2.owned_count("strike") == 5 and pool2.owned_count("guard") == 3 and pool2.owned_count("call") == 2, "仓库打击 5、护住 3、呼喊 2")
 	check(pool2.owned_count("quench") == 2 and pool2.owned_count("surge") == 1 and pool2.owned_count("bulwark") == 1, "仓库增幅牌：淬火 2、蓄能 1、筑壁 1")
 	check(pool2.can_add("quench"), "增幅牌可以加进卡组")
@@ -1184,7 +1191,7 @@ func test_scene_stacking() -> void:
 	var drag_data: Variant = strike_b._get_drag_data(Vector2.ZERO)
 	var staged_point: Vector2 = scene.get_global_transform().affine_inverse() * staged_button.get_global_rect().get_center()
 	check(scene._can_drop_data(staged_point, drag_data), "悬停同类已摆牌被接受")
-	check((staged_button.get_theme_stylebox("normal") as StyleBoxFlat).border_color == Color(1.0, 0.87, 0.55), "可叠目标描金高亮")
+	check((staged_button as CardButton).is_merge_highlighted(), "可叠目标描金高亮")
 	scene._drop_data(staged_point, drag_data)
 	check(scene.state.staged.size() == 1, "合成为一张，占同一卡槽")
 	check(scene.state.staged[0].display_name == "打击＋打击" and scene.state.staged[0].cost == 3, "合成牌 打击＋打击，费用 3")
@@ -1319,7 +1326,7 @@ func test_engine_drag_input() -> void:
 			_push_mouse_motion(viewport, merge_from + Vector2(10.0, -10.0))
 			_push_mouse_motion(viewport, merge_to)
 			check(scene._drag_target_now == "play", "悬停合成目标时仍记为出牌区")
-			check((staged_target.get_theme_stylebox("normal") as StyleBoxFlat).border_color == Color(1.0, 0.87, 0.55), "叠合目标描金高亮")
+			check((staged_target as CardButton).is_merge_highlighted(), "叠合目标描金高亮")
 			_push_mouse_button(viewport, merge_to, false)
 			check(scene.state.staged.size() == 1, "合成后仍占一个卡槽")
 			check(scene.state.staged[0].is_merged() and scene.state.staged[0].cost == 3, "引擎拖叠合成，费用 3（1+1+叠费）")

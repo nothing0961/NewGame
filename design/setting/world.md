@@ -130,11 +130,12 @@
 - 解锁状态**每场战斗重新检定**（不随牌组永久携带）
 - 玩法定位：罪卡＝「本场的大招」——任务/保底把它推到中后盘，Cost 6 让它独占一回合的资源
 - 教程战学不到的：收下暴怒时战斗已结束、当场用不到它；罪卡的解锁/一次限制从第二层起自然展示（蓄意）
-- 原型实现：`BattleConfig.SIN_CARD_ID` / `SIN_ROUND_FALLBACK=8` / `SIN_TASK_ATTACK_PLAYS=3`；`BattleState.turn_count` / `attack_plays_this_battle` / `sin_available` / `sin_used_this_battle` / `_check_sin_unlock` / `_sin_available` / `sin_lock_reason`；`BattleScreen` tooltip 显示封印原因与任务进度；罪卡专属暖红卡面样式（`CardButton.sin_style`）
+- 原型实现：`BattleConfig.SIN_CARD_ID` / `SIN_ROUND_FALLBACK=8` / `SIN_TASK_ATTACK_PLAYS=3`；`BattleState.turn_count` / `attack_plays_this_battle` / `sin_available` / `sin_used_this_battle` / `_check_sin_unlock` / `_sin_available` / `sin_lock_reason`；`BattleScreen` tooltip 显示封印原因与任务进度；罪卡专属紫色卡框（`frame_sin`）
 
-## 卡牌分类与仓库卡池【用户定 2026-10-04：三类＋同日续追加「增幅」】
+## 卡牌分类与仓库卡池【用户定 2026-10-04：三类＋同日续追加「增幅」；2026-10-05 增幅呈现并入功能】
 
-- 卡牌分类：**攻击 / 防御 / 功能 / 增幅**四类（罪卡独立、敌方占位牌独立；增幅类见下节）
+- 卡牌分类（机制层）：**攻击 / 防御 / 功能 / 增幅**四类（罪卡独立、敌方占位牌独立；增幅类见下节）
+- **呈现层（2026-10-05 用户定）：增幅并入功能**——四色卡框＝**红攻击 / 蓝防御 / 黄功能（含增幅）/ 紫罪卡**；仓库/卡组/卡面标签中增幅统一显示「功能」（`kind_label` 返回「功能」），机制不变（仍不可打出、不参与堆叠、仅主动弃牌触发）
 - 仓库初始卡池 **20 张【16→20，追加增幅 4 张】**（＞卡组上限 8，prune 型组卡＝真选择）：
 
 | 类别 | 卡 | Cost | 效果（首版） | 张数 |
@@ -151,13 +152,14 @@
 
 - 变体定位：每类强弱两档、全部 Cost 1（读起来最快）；大的版本单张更强、给的张数更少——在「稳定（多张小牌）」与「爆发（大牌）」间取舍
 - 转换＝引擎牌（抽牌），为后续「组合」玩法留设施；强度待实测后再看
-- 界面呈现：仓库/卡组行加【攻击/防御/功能/增幅】前缀标签（`CardData.kind_label`）
+- 界面呈现：仓库/卡组行加【攻击/防御/功能】前缀标签（`CardData.kind_label`；增幅显示为【功能】，见上）
 - 默认卡组（跳过练习时）保持 5 打击/2 护住/1 呼喊不变
 - 原型实现：`BattleConfig.WAREHOUSE_INITIAL`；`data/cards/heavy_strike.tres` / `strong_guard.tres` / `shift.tres` / `quench.tres` / `surge.tres` / `bulwark.tres`；`CardData.Kind` 加 DEFENSE / UTILITY / AMPLIFY（AMPLIFY 列为枚举末位，避免旧 `.tres` 整数重编号错位）
 
 ## 增幅类（弃牌触发加成）【用户定 2026-10-04】
 
 - 定位：第四类卡牌「增幅」——**弃牌后获得数值加成**，加成内容以卡面为准（统一格式「弃掉：……」）
+- 呈现（2026-10-05）：**并入功能类**，共用黄色卡框与【功能】标签——机制层仍为独立一类
 - **触发边界**：仅**主动拖到弃牌区弃掉**触发；手牌超限的强制弃牌不触发
 - **时效：本回合**（新回合清零；不跨回合累积）
 - 增幅牌**不能打出/摆放**（手牌灰显；拖拽仅弃牌区接受）——它的存在方式就是「被弃掉」
@@ -175,7 +177,15 @@
 - **核心价值：堆叠绕过出牌区 5 卡槽上限**——把更多价值压进同一卡槽，代价是多付叠费（空间换资源）
 - 结算：合成牌的攻击任务按**原牌张数**计（合两攻击并打出＝累计 2）；打出后弃牌堆里是**原牌**（合成体不粘进牌堆）；合成牌名「打击＋重击」形（＋连接）
 - 拖叠目标提示：拖拽中悬停可叠牌 → 该牌描金高亮
-- 原型实现：`BattleConfig.STACK_FEE`；`BattleState.can_merge_with` / `merge_into_staged` / `_make_merged` / `_parts_of`；`CardData.parts` / `is_merged()`；`signal card_merged`；`CardButton.set_merge_highlight`（正常态 stylebox 换描金边框，duplicate 自 `_base_normal_style`）；拖放命中走 `BattleScreen._merge_target_at` / `_update_merge_hover`（**须过滤 `is_queued_for_deletion()` 的旧子节点——rebuild 残留会造成索引错位**）
+- 原型实现：`BattleConfig.STACK_FEE`；`BattleState.can_merge_with` / `merge_into_staged` / `_make_merged` / `_parts_of`；`CardData.parts` / `is_merged()`；`signal card_merged`；`CardButton.set_merge_highlight`（描金边框面板 `MergeHighlight` 显隐，测试用 `is_merge_highlighted()`）；拖放命中走 `BattleScreen._merge_target_at` / `_update_merge_hover`（**须过滤 `is_queued_for_deletion()` 的旧子节点——rebuild 残留会造成索引错位**）
+
+## 卡牌视觉样式（四色卡框）【用户定 2026-10-05】
+
+- **四色语汇**：红＝攻击、蓝＝防御、黄＝功能（含增幅）、紫＝罪卡——卡框即牌的种类标识
+- 卡框素材：`assets/sprites/cards/frame_{attack,defense,utility,sin}.png`（236×342 @2x，透明抠底；源图用户提供四宫格）
+- 卡面尺寸 **118×171**（宽不变、高 142→171 贴合卡框比例 0.69）；标签区按卡框实测定位：Cost 数字在左上徽章、牌名在上方绶带（字号随字数自适应）、效果文本在中部米色区、出牌区「（点击收回）」提示在下方饰带
+- 各状态呈现：悬停＝放大 1.12＋抬升 26＋卡框微亮；不可用/非玩家回合＝整牌置灰（modulate 0.55）；拖叠目标＝描金边框面板
+- 原型实现：`CardButton` 重写（TextureRect 直读 PNG `Image.load_from_file`，静态缓存；Button 自带 stylebox 全部置空；`set_hint()`）；`BattleScreen.FAN_CARD_SIZE = CardButton.CARD_SIZE`；battle.tscn 手牌区/出牌区/日志区重新排布
 
 ## 练习站独立入口【用户定 2026-10-04：独立于剧情、供自由练习】
 
