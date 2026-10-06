@@ -199,7 +199,7 @@ func _build_highlight() -> void:
 	add_child(_highlight_panel)
 
 
-# 卡框 PNG 直读：Maker 产出的素材无需编辑器导入即可加载（与音频 load_from_file 同法）
+# 卡框 PNG 加载：优先资源系统（导出版从 pck 读），回退直读原始文件（编辑器内未导入素材）
 static func _frame_texture(kind: int) -> Texture2D:
 	var file_name := "frame_utility"
 	match kind:
@@ -215,7 +215,11 @@ static func _frame_texture(kind: int) -> Texture2D:
 		return _frame_cache[file_name] as Texture2D
 	var texture: Texture2D = null
 	var path := FRAME_DIR + file_name + ".png"
-	if FileAccess.file_exists(path):
+	if ResourceLoader.exists(path):
+		var res := load(path)
+		if res is Texture2D:
+			texture = res
+	elif FileAccess.file_exists(path):
 		var image := Image.load_from_file(path)
 		if image != null and not image.is_empty():
 			texture = ImageTexture.create_from_image(image)

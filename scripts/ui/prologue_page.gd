@@ -124,7 +124,7 @@ func _refresh() -> void:
 	_continue_button.text = String(beat.get("button_label", "继续"))
 
 
-# 运行时资源直读（Maker 产图无需编辑器导入，与音频 load_from_file 同法）；缺失静默隐藏
+# 立绘/背景加载：优先资源系统（导出版从 pck 读），回退直读原始文件；缺失静默隐藏
 func _apply_texture(rect: TextureRect, file_name: String) -> void:
 	if file_name == "":
 		rect.texture = null
@@ -133,7 +133,11 @@ func _apply_texture(rect: TextureRect, file_name: String) -> void:
 	var path := PrologueData.BG_DIR + file_name + ".png"
 	if not _texture_cache.has(path):
 		var texture: Texture2D = null
-		if FileAccess.file_exists(path):
+		if ResourceLoader.exists(path):
+			var res := load(path)
+			if res is Texture2D:
+				texture = res
+		elif FileAccess.file_exists(path):
 			var image := Image.load_from_file(path)
 			if image != null and not image.is_empty():
 				texture = ImageTexture.create_from_image(image)

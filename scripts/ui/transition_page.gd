@@ -69,12 +69,18 @@ func show_transition(lines: Array) -> void:
 	_read_text.text = "\n\n".join(PackedStringArray(lines))
 
 
-# 运行时资源直读（Maker 产图无需编辑器导入）；缺失静默回退纯色底
+# 插画加载：优先资源系统（导出版从 pck 读），回退直读原始文件；缺失静默回退纯色底
 func _apply_illustration() -> void:
-	if not FileAccess.file_exists(ILLUSTRATION_PATH):
+	var texture: Texture2D = null
+	if ResourceLoader.exists(ILLUSTRATION_PATH):
+		var res := load(ILLUSTRATION_PATH)
+		if res is Texture2D:
+			texture = res
+	elif FileAccess.file_exists(ILLUSTRATION_PATH):
+		var image := Image.load_from_file(ILLUSTRATION_PATH)
+		if image != null and not image.is_empty():
+			texture = ImageTexture.create_from_image(image)
+	if texture == null:
 		return
-	var image := Image.load_from_file(ILLUSTRATION_PATH)
-	if image == null:
-		return
-	_illustration.texture = ImageTexture.create_from_image(image)
+	_illustration.texture = texture
 	_illustration.visible = true

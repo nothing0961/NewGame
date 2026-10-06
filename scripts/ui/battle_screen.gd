@@ -648,10 +648,14 @@ func _play_sfx(sfx_name: String) -> void:
 	(_sfx_players[sfx_name] as AudioStreamPlayer).play()
 
 
-# 用 load_from_file 直读：Maker 产出的音频文件无需编辑器导入即可加载
+# 音效加载：优先资源系统（导出版从 pck 读），回退直读原始文件（编辑器内未导入素材）
 func _load_sfx(sfx_name: String) -> AudioStream:
 	for ext in SFX_EXTS:
 		var path := SFX_DIR + sfx_name + ext
+		if ResourceLoader.exists(path):
+			var res := load(path)
+			if res is AudioStream:
+				return res
 		if not FileAccess.file_exists(path):
 			continue
 		match ext:
