@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "anger"
+display_name = "暴怒"
+kind = 4
+cost = 6
+text = "造成 7 点伤害，并获得 3 点格挡。\n解锁后每场战斗仅能打出一次；打出后它不再离开你。"
+flavor = "一点就着。现在它认你了。"
+permanent = true
+effects = Array[Dictionary]([{
+"op": "deal_damage",
+"amount": 7
+}, {
+"op": "gain_block",
+"amount": 3
+}])

@@ -36,9 +36,15 @@ func _initialize() -> void:
 	test_card_stacking()
 	test_practice_battle()
 	test_layer_data()
+	test_layer_pools_complete()
+	test_layer_bosses_complete()
+	test_sin_cards_data()
+	test_last_playable_boundary()
+	test_entry_hp_modifier()
 	test_card_pool_sin()
 	test_story_battle_small()
 	test_story_battle_boss()
+	test_boss_strip_flow_layer3()
 	test_multi_enemy_helpers()
 	test_teaching_battle_logic()
 	test_teaching_sleep_timeout()
@@ -52,6 +58,7 @@ func _initialize() -> void:
 	await test_map_page()
 	await test_map_route_scroll()
 	await test_event_page()
+	await test_event_effect_flow()
 	await test_transition_page()
 	await test_scene_turn_timer()
 	await test_scene_drag_and_discard()
@@ -178,8 +185,8 @@ func _route_signature(route: Array) -> String:
 # 随机性由 test_layer_data 的生成器测试单独覆盖
 func _fixture_route() -> Array:
 	return [
-		[_pool_event("粉雾"), _pool_battle("污染体"), _pool_event("镜阶")],
-		[_pool_battle("残响回廊"), _pool_event("烛台走廊")],
+		[_pool_event("试衣镜"), _pool_battle("粉雾歌者"), _pool_event("糖果摊")],
+		[_pool_battle("糖丝傀儡"), _pool_event("合唱席")],
 		[LayerConfig.LAYER2_BOSS],
 	]
 
@@ -240,6 +247,21 @@ func _deep_find_route(node: Node) -> MapPage.RouteView:
 		if found != null:
 			return found
 	return null
+
+
+# 深层查找任意文本节点（Label/Button）是否含片段（用于断言「某文案不在屏上」）
+func _deep_has_text(node: Node, fragment: String) -> bool:
+	if not node.is_queued_for_deletion():
+		if node is Label and (node as Label).text.contains(fragment):
+			return true
+		if node is Button and (node as Button).text.contains(fragment):
+			return true
+	for child in node.get_children():
+		if child.is_queued_for_deletion():
+			continue
+		if _deep_has_text(child, fragment):
+			return true
+	return false
 
 
 # 长线夹具：6 普通列×1 节点＋层主战＝7 列 1608px（＞地图页 1120 视口宽，必溢出可滚）
@@ -367,7 +389,7 @@ func _drive_teaching_victory(scene: Variant) -> void:
 
 func test_cards_load() -> void:
 	print("[卡牌数据]")
-	for card_id in ["strike", "heavy_strike", "guard", "strong_guard", "call", "shift", "wrath", "enemy_strike", "quench", "surge", "bulwark", "heal", "cleanse", "greed_shot", "snail_bite"]:
+	for card_id in ["strike", "heavy_strike", "guard", "strong_guard", "call", "shift", "wrath", "enemy_strike", "quench", "surge", "bulwark", "heal", "cleanse", "greed_shot", "snail_bite", "gnaw", "gold_smash", "mirror_cut", "piercing_light", "falling_debris", "ember_lash", "flame_burst", "gluttony", "greed", "envy", "pride", "anger"]:
 		var card := CardDB.get_card(card_id)
 		check(card != null, "载入 " + card_id)
 		if card != null:
@@ -1096,12 +1118,12 @@ func test_practice_battle() -> void:
 
 
 func test_layer_data() -> void:
-	print("[层数据：八层表 / 占位池 / 路线随机生成 / 局内进度]")
+	print("[层数据：八层表 / 各层内容池 / 路线随机生成 / 局内进度]")
 	check(LayerConfig.MAX_LAYER == 8, "共八层")
 	check(LayerConfig.layer_name(1) == "懒惰" and LayerConfig.demon_name(1) == "贝尔芬格", "第 1 层懒惰·贝尔芬格")
 	check(LayerConfig.layer_name(2) == "色欲" and LayerConfig.demon_name(2) == "阿斯莫德", "第 2 层色欲·阿斯莫德")
 	check(LayerConfig.layer_name(8) == "同位体" and LayerConfig.demon_name(8) == "贝嘉", "第 8 层同位体·贝嘉")
-	# 占位池（作战 4＋事件 5；层主独立）
+	# 第 2 层池细查（作战 4＋事件 5；层主独立）；L3–7 池完整性与容量由 test_layer_pools_complete 覆盖
 	check(LayerConfig.LAYER2_BATTLES.size() == 4, "作战池 4 项")
 	check(LayerConfig.LAYER2_EVENTS.size() == 5, "事件池 5 项")
 	check(LayerConfig.LAYER2_BOSS.get("boss", false) and String(LayerConfig.LAYER2_BOSS.get("enemy", "")) == "阿斯莫德", "层主独立不入池")
@@ -1138,11 +1160,11 @@ func test_layer_data() -> void:
 				seen[key] = true
 	check(min_cols == bounds2.x and max_cols == bounds2.y, "40 掷里 2 列与 4 列都出现过")
 	check(min_nodes == LayerConfig.ROUTE_MIN_NODES and max_nodes == LayerConfig.ROUTE_MAX_NODES, "40 掷里 1 节点与 3 节点列都出现过")
-	# 全层覆盖（第 2–8 层各 12 掷，聚合断言）：列数落该层区间、末列＝该层层主唯一节点、普通列 1–3、
-	# 同列不重复（池耗尽循环补足下仍保证）；第 3 层起为骨架占位（共用池、层主名取自层表）
+	# 全层覆盖（第 2–7 层各 12 掷，聚合断言）：列数落该层区间、末列＝该层层主唯一节点、普通列 1–3、
+	# 同列不重复；第 8 层（同位体终局）待专轮，不在内容范围
 	var layer_rng := RandomNumberGenerator.new()
 	layer_rng.seed = 778899
-	for layer in range(2, LayerConfig.MAX_LAYER + 1):
+	for layer in range(2, LayerConfig.LAST_PLAYABLE_LAYER + 1):
 		var bounds := LayerConfig.route_length_range(layer)
 		var cols_ok := true
 		var boss_ok := true
@@ -1170,18 +1192,9 @@ func test_layer_data() -> void:
 		check(boss_ok, "第 %d 层末列均为该层层主唯一节点（%s）" % [layer, LayerConfig.demon_name(layer)])
 		check(columns_ok, "第 %d 层普通列均 1–3 节点" % layer)
 		check(no_dup, "第 %d 层同列均不重复" % layer)
-	# 池耗尽循环补足：第 8 层单图最大需求 6 列×3＝18＞池 9，30 掷里应出现超池路线
-	var big_rng := RandomNumberGenerator.new()
-	big_rng.seed = 20261005
-	var saw_over_pool := false
-	for roll in 30:
-		var route := LayerConfig.generate_route(8, big_rng)
-		var nodes := 0
-		for c in route.size() - 1:
-			nodes += (route[c] as Array).size()
-		if nodes > 9:
-			saw_over_pool = true
-	check(saw_over_pool, "第 8 层出现超池路线（循环补足不卡死）")
+	# 第 8 层（同位体终局）待专轮：不生成路线（生成返回空）
+	for _roll in 5:
+		check(LayerConfig.generate_route(8, layer_rng).is_empty(), "第 8 层待专轮：生成空路线")
 	# 线随层拉长：区间表单调不降＋首尾对照
 	check(LayerConfig.route_length_range(2) == Vector2i(2, 4), "第 2 层基准 2–4 列")
 	check(LayerConfig.route_length_range(8) == Vector2i(5, 7), "第 8 层拉长到 5–7 列")
@@ -1213,7 +1226,7 @@ func test_layer_data() -> void:
 	run.tutorial_done = true
 	check(run.is_layer_cleared(1), "教程完成后第 1 层已净化")
 	check(run.is_layer_unlocked(2), "第 2 层解锁")
-	check(not run.is_layer_unlocked(3), "第 3 层无内容仍锁定")
+	check(not run.is_layer_unlocked(3), "第 3 层未走到仍锁定")
 	run.rng.seed = 424242
 	var generated := run.current_columns()
 	check(generated.size() >= bounds2.x and generated.size() <= bounds2.y and (generated[generated.size() - 1][0] as Dictionary).get("boss", false), "首次读取生成合法路线")
@@ -1229,12 +1242,12 @@ func test_layer_data() -> void:
 	check(run.node_state(0, 0) == RunState.NodeState.CURRENT, "第一列节点当前可选")
 	check(run.node_state(1, 0) == RunState.NodeState.FUTURE, "第二列未到")
 	var picked := run.choose(2)
-	check(String(picked.get("title", "")) == "镜阶", "选下节点返回该关卡")
+	check(String(picked.get("title", "")) == "糖果摊", "选下节点返回该关卡")
 	check(run.column_index == 1, "选路推进到第二列")
 	check(run.node_state(0, 2) == RunState.NodeState.DONE, "已走节点＝已走")
 	check(run.node_state(0, 0) == RunState.NodeState.MISSED, "同列未选＝错失")
 	check(run.node_state(1, 1) == RunState.NodeState.CURRENT, "第二列当前可选")
-	check(String(run.choose(0).get("enemy", "")) == "残响回廊", "第二列选作战节点")
+	check(String(run.choose(0).get("enemy", "")) == "糖丝傀儡", "第二列选作战节点")
 	check(not run.is_route_finished(), "还剩层主战")
 	check(run.choose(0).get("boss", false), "第三列选层主战")
 	check(run.is_route_finished(), "路线走完")
@@ -1250,8 +1263,153 @@ func test_layer_data() -> void:
 	run.complete_layer()
 	check(run.current_layer == 3, "层完成上行到第 3 层")
 	check(run.column_index == 0 and run.chosen.is_empty(), "上行后选路记录清空")
-	check(not run.is_layer_unlocked(3), "第 3 层仍锁定（待续）")
-	check(run.is_demo_end(), "到达 demo 边界")
+	check(run.is_layer_unlocked(3), "第 3 层解锁（内容楼层）")
+	check(not run.is_demo_end(), "第 3 层不是 demo 边界")
+	# 连过到第 8 层＝本段内容边界（同位体终局待专轮）
+	for _i in range(3, 8):
+		run.complete_layer()
+	check(run.current_layer == 8, "连过第 3–7 层后上行到第 8 层")
+	check(not run.is_layer_unlocked(8) and run.is_demo_end(), "第 8 层锁定＝停在本段内容边界")
+
+
+# 各层内容池完整性：数量表、容量＝单图最大需求、字段完整、敌牌组 8 张全可载入、事件效果对齐
+func test_layer_pools_complete() -> void:
+	print("[各层内容池：数量/容量/字段/敌牌组/事件效果]")
+	var expected := {2: Vector2i(4, 5), 3: Vector2i(5, 4), 4: Vector2i(5, 7), 5: Vector2i(5, 7), 6: Vector2i(7, 8), 7: Vector2i(8, 7)}
+	for layer in range(2, LayerConfig.LAST_PLAYABLE_LAYER + 1):
+		var battles: Array = LayerConfig.LAYER_BATTLES[layer]
+		var events: Array = LayerConfig.LAYER_EVENTS[layer]
+		var want: Vector2i = expected[layer]
+		check(battles.size() == want.x and events.size() == want.y, "第 %d 层池数量＝作战 %d＋事件 %d" % [layer, want.x, want.y])
+		# 容量：单图最大需求（最大列数−1 列 × 每列上限 3）＝池容量（洗牌全图不重复不发愁）
+		var bounds := LayerConfig.route_length_range(layer)
+		var capacity := (bounds.y - 1) * LayerConfig.ROUTE_MAX_NODES
+		check(battles.size() + events.size() == capacity, "第 %d 层池容量＝单图最大需求 %d" % [layer, capacity])
+		var names := {}
+		for battle in battles:
+			var enemy := String(battle.get("enemy", ""))
+			check(String(battle.get("type", "")) == LayerConfig.TYPE_BATTLE and enemy != "" and int(battle.get("enemy_hp", 0)) > 0, "第 %d 层作战字段完整：%s" % [layer, enemy])
+			check(not names.has(enemy), "第 %d 层名不重：%s" % [layer, enemy])
+			names[enemy] = true
+			var deck: Dictionary = battle.get("enemy_deck", {})
+			var total := 0
+			var deck_ok := true
+			for card_id in deck:
+				total += int(deck[card_id])
+				var card := CardDB.get_card(String(card_id))
+				if card == null or card.kind != CardData.Kind.ENEMY:
+					deck_ok = false
+			check(deck_ok and total == 8, "第 %d 层敌牌组 8 张且全为敌牌：%s" % [layer, enemy])
+		for event_item in events:
+			var title := String(event_item.get("title", ""))
+			check(String(event_item.get("scene", "")) != "" and (event_item.get("choices", []) as Array).size() == 3 and (event_item.get("feedback", []) as Array).size() == 3, "第 %d 层事件字段完整：%s" % [layer, title])
+			check(not names.has(title), "第 %d 层名不重：%s" % [layer, title])
+			names[title] = true
+			var effects: Array = event_item.get("effects", [])
+			check(effects.size() == 3, "第 %d 层事件效果对齐选项数：%s" % [layer, title])
+			# 每事件 ≥1 个无代价项（空效果或疗愈）；效果词汇仅 hp 整数（非 0）
+			var has_safe := false
+			var effects_ok := true
+			for effect in effects:
+				if not (effect is Dictionary):
+					effects_ok = false
+					continue
+				var dict: Dictionary = effect
+				if dict.is_empty():
+					has_safe = true
+					continue
+				for key in dict:
+					if String(key) != "hp":
+						effects_ok = false
+					elif typeof(dict[key]) != TYPE_INT or int(dict[key]) == 0:
+						effects_ok = false
+					elif int(dict[key]) > 0:
+						has_safe = true
+			check(effects_ok and has_safe, "第 %d 层事件效果词汇＝hp 整数且≥1 个无代价项：%s" % [layer, title])
+
+
+# 各层层主三键守护（STRIP 死锁防线）：sin_card/strip_lines/purify_lines 必填、罪卡可载入
+func test_layer_bosses_complete() -> void:
+	print("[各层层主：三键必填（STRIP 死锁防线）/ 恶魔名 / 罪卡可载入]")
+	var sin_by_layer := {2: "lust", 3: "gluttony", 4: "greed", 5: "envy", 6: "pride", 7: "anger"}
+	for layer in range(2, LayerConfig.LAST_PLAYABLE_LAYER + 1):
+		var boss: Dictionary = LayerConfig.LAYER_BOSSES[layer]
+		check(not boss.is_empty() and boss.get("boss", false), "第 %d 层层主节点存在" % layer)
+		check(String(boss.get("enemy", "")) == LayerConfig.demon_name(layer), "第 %d 层层主名＝%s" % [layer, LayerConfig.demon_name(layer)])
+		check(int(boss.get("enemy_hp", 0)) > 0 and not (boss.get("enemy_deck", {}) as Dictionary).is_empty(), "第 %d 层层主血量与敌牌组在" % layer)
+		var sin_id := String(boss.get("sin_card", ""))
+		check(sin_id == sin_by_layer[layer], "第 %d 层收下罪卡＝%s" % [layer, sin_by_layer[layer]])
+		var sin_card := CardDB.get_card(sin_id)
+		check(sin_card != null and sin_card.kind == CardData.Kind.SIN, "第 %d 层罪卡数据可载入" % layer)
+		# L2 保留既有文案（净化 3 行）；L3–7 为本轮新写（净化 4 行）
+		var purify_min := 4 if layer >= 3 else 3
+		check((boss.get("strip_lines", []) as Array).size() >= 3, "第 %d 层剥污染读白 ≥3 行" % layer)
+		check((boss.get("purify_lines", []) as Array).size() >= purify_min, "第 %d 层净化读白 ≥%d 行" % [layer, purify_min])
+
+
+# 先行版罪卡数据（design-round8；各具特色，待罪卡专轮替换）：cost 6 / 永久 / 效果与任务参数
+func test_sin_cards_data() -> void:
+	print("[先行版罪卡：cost 6・永久・效果/任务参数齐备]")
+	var configs := {
+		"gluttony": ["deal_damage", "heal"],
+		"greed": ["deal_damage", "draw_cards"],
+		"envy": ["deal_damage", "suppress_enemy_attack"],
+		"pride": ["deal_damage"],
+		"anger": ["deal_damage", "gain_block"],
+	}
+	for card_id in configs:
+		var card := CardDB.get_card(card_id)
+		check(card != null and card.kind == CardData.Kind.SIN, card_id + " 是罪牌")
+		if card == null:
+			continue
+		check(card.cost == 6 and card.permanent, card_id + " cost 6・永久")
+		var ops := PackedStringArray()
+		for effect in card.effects:
+			ops.append(String(effect.get("op", "")))
+		for want_op in configs[card_id]:
+			check(ops.has(want_op), "%s 效果含 %s" % [card_id, want_op])
+		check(BattleConfig.SIN_TASK_CONFIG.has(card_id), card_id + " 有任务参数")
+
+
+# 内容边界：LAST_PLAYABLE_LAYER=7；第 8 层不生成路线（同位体终局专轮）
+func test_last_playable_boundary() -> void:
+	print("[内容边界：第 7 层＝本段最后可玩层；第 8 层待专轮]")
+	check(LayerConfig.LAST_PLAYABLE_LAYER == 7, "最后可玩层＝7")
+	check(LayerConfig.has_content(1) and LayerConfig.has_content(7), "教程层与第 7 层有内容")
+	check(not LayerConfig.has_content(8), "第 8 层无内容（待专轮）")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 13579
+	check(LayerConfig.generate_route(8, rng).is_empty(), "第 8 层不生成路线")
+	check(LayerConfig.transition_lines(7).size() == 3, "第 7 层过渡读白兼待续钩子")
+	var run := RunState.new()
+	run.tutorial_done = true
+	run.current_layer = 8
+	check(run.is_demo_end(), "停在第 8 层＝demo 边界")
+	check(not run.is_layer_unlocked(8), "第 8 层锁定")
+
+
+# 层内续航（design-round8）：事件效果合入 pending_hp_delta → 入战 HP；clamp/清零/默认值
+func test_entry_hp_modifier() -> void:
+	print("[层内续航：事件效果合入入场 HP 修正（clamp/清零/入战）]")
+	var run := RunState.new()
+	check(run.pending_hp_delta == 0 and run.entry_hp() == BattleConfig.PLAYER_MAX_HP, "初始无修正、入场满血")
+	run.apply_hp_delta(-1)
+	run.apply_hp_delta(-1)
+	check(run.pending_hp_delta == -2 and run.entry_hp() == BattleConfig.PLAYER_MAX_HP - 2, "掉血累积")
+	run.apply_hp_delta(1)
+	check(run.pending_hp_delta == -1, "疗愈抵消掉血")
+	run.apply_hp_delta(5)
+	check(run.pending_hp_delta == 0, "回血最多抵消到 0（不超满血）")
+	run.apply_hp_delta(-20)
+	check(run.pending_hp_delta == -9 and run.entry_hp() == 1, "掉血下限 −9（入场至少 1 血）")
+	run.reset_layer()
+	check(run.pending_hp_delta == 0 and run.entry_hp() == BattleConfig.PLAYER_MAX_HP, "死亡重掷/层完成清零")
+	var state := BattleState.new()
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("粉雾歌者"), 8)
+	check(state.player_hp == 8, "start_story 带伤入场（8/10）")
+	var state2 := BattleState.new()
+	state2.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("粉雾歌者"))
+	check(state2.player_hp == BattleConfig.PLAYER_MAX_HP, "start_story 默认满血入场")
 
 
 func test_card_pool_sin() -> void:
@@ -1279,9 +1437,9 @@ func test_story_battle_small() -> void:
 	var logs: Array = []
 	var state := BattleState.new()
 	state.log_event.connect(func(text: String) -> void: logs.append(text))
-	state.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("污染体"))
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("粉雾歌者"))
 	check(state.mode == BattleState.Mode.STORY, "层战模式")
-	check(state.enemy_name == "污染体" and state.enemy_max_hp == 20, "对手与血量按关卡配置")
+	check(state.enemy_name == "粉雾歌者" and state.enemy_max_hp == 16, "对手与血量按关卡配置")
 	check(not state.is_boss, "小怪战非层主")
 	check(state.sin_card_id == "", "小怪战无收下环节")
 	state.debug_force_plays = 0
@@ -1322,6 +1480,27 @@ func test_story_battle_boss() -> void:
 	check(state2.deck_sin_id == "lust", "牌组里的色欲被识别为检定对象")
 	check(state2.sin_lock_reason().contains("（0/2）"), "色欲任务进度 0/2")
 	check(not state2.sin_available, "开局封锁")
+
+
+# L3–7 层层主全链：三键齐备 → 打倒 → STRIP → 收下 → 净化读白 → 结束（STRIP 死锁防线端到端）
+func test_boss_strip_flow_layer3() -> void:
+	print("[层主净化链 L3–7：打倒 → STRIP → 收下 → 净化读白 → 结束]")
+	var sin_by_layer := {3: "gluttony", 4: "greed", 5: "envy", 6: "pride", 7: "anger"}
+	for layer in range(3, LayerConfig.LAST_PLAYABLE_LAYER + 1):
+		var state := BattleState.new()
+		state.start_story(["strike", "strike", "strike", "strike", "strike"], LayerConfig.LAYER_BOSSES[layer])
+		check(state.is_boss and state.sin_card_id == sin_by_layer[layer], "第 %d 层层主战收下罪卡＝%s" % [layer, sin_by_layer[layer]])
+		state.debug_force_plays = 0
+		var safety := 0
+		while state.phase == BattleState.Phase.PLAYER and safety < 240:
+			safety += 1
+			_turn_cycle(state, ["strike"])
+		check(state.phase == BattleState.Phase.STRIP, "第 %d 层打倒层主进入净化时刻" % layer)
+		check(state.absorb_sin(), "第 %d 层拿起罪卡" % layer)
+		check(state.collection.size() == 1 and state.collection[0].id == sin_by_layer[layer], "第 %d 层罪卡进收藏" % layer)
+		check(state.phase == BattleState.Phase.DEBRIEF, "第 %d 层进入净化读白" % layer)
+		check(state.finish_debrief(), "第 %d 层读完即结束（层战无三问）" % layer)
+		check(state.phase == BattleState.Phase.ENDED, "第 %d 层层主战结束" % layer)
 
 
 func test_multi_enemy_helpers() -> void:
@@ -1674,7 +1853,7 @@ func test_battle_scene_defeat() -> void:
 	if packed == null:
 		return
 	var scene: Variant = packed.instantiate()
-	scene.configure(BattleState.Mode.STORY, ["strike", "strike", "strike", "strike", "strike"], _pool_battle("污染体"))
+	scene.configure(BattleState.Mode.STORY, ["strike", "strike", "strike", "strike", "strike"], _pool_battle("粉雾歌者"))
 	var viewport := _attach_scene(scene)
 	await process_frame
 	var lost_calls: Array = []
@@ -1700,7 +1879,7 @@ func test_battle_scene_defeat() -> void:
 
 
 func test_map_page() -> void:
-	print("[层地图页：三态＋当前层展开路线图（节点四态）]")
+	print("[层地图页：四态（已净化/当前/未解锁/待续）＋当前层展开路线图（节点四态）]")
 	var page := MapPage.new()
 	var viewport := _attach_scene(page)
 	# SubViewport 不会给直接 Control 子节点自动定尺寸，手动给全屏矩形（真机里由父级布局给）
@@ -1721,16 +1900,20 @@ func test_map_page() -> void:
 	var layer2 := _deep_find_button(page, "第 2 层·色欲")
 	check(layer2 != null and layer2.text.contains("当前"), "第 2 层当前")
 	var layer3 := _deep_find_button(page, "第 3 层·暴食")
-	check(layer3 != null and layer3.text.contains("待续") and not layer3.disabled, "第 3 层待续可点")
+	check(layer3 != null and layer3.text.contains("未解锁") and not layer3.disabled, "第 3 层未解锁可点（有内容）")
 	layer3.pressed.emit()
-	check(page._toast.visible and page._toast.text.contains("待续"), "点未解锁层提示待续")
-	var fog := _deep_find_button(page, "事件·粉雾")
-	var pol1 := _deep_find_button(page, "作战·污染体")
-	var mirror := _deep_find_button(page, "事件·镜阶")
+	check(page._toast.visible and page._toast.text.contains("先走完"), "点未解锁层提示先走完前面的层")
+	var layer8 := _deep_find_button(page, "第 8 层·同位体")
+	check(layer8 != null and layer8.text.contains("待续") and not layer8.disabled, "第 8 层待续可点（无内容）")
+	layer8.pressed.emit()
+	check(page._toast.visible and page._toast.text.contains("待续"), "点待续层提示待续")
+	var fog := _deep_find_button(page, "事件·试衣镜")
+	var pol1 := _deep_find_button(page, "作战·粉雾歌者")
+	var mirror := _deep_find_button(page, "事件·糖果摊")
 	check(fog != null and not fog.disabled, "第一列事件节点可选")
 	check(pol1 != null and not pol1.disabled, "同列作战节点也可选")
 	check(mirror != null and not mirror.disabled, "同列第三个节点可选")
-	var echo := _deep_find_button(page, "作战·残响回廊")
+	var echo := _deep_find_button(page, "作战·糖丝傀儡")
 	check(echo != null and echo.disabled, "下一列节点未到不可点")
 	var boss_node := _deep_find_button(page, "层主战·阿斯莫德")
 	check(boss_node != null and boss_node.disabled, "层主战节点未到不可点")
@@ -1739,13 +1922,13 @@ func test_map_page() -> void:
 	run.choose(0)
 	page.build(run)
 	await process_frame
-	var fog_after := _deep_find_button(page, "事件·粉雾")
+	var fog_after := _deep_find_button(page, "事件·试衣镜")
 	check(fog_after.text.contains("✓") and fog_after.disabled, "已走节点标 ✓ 不可再点")
-	var pol_after := _deep_find_button(page, "作战·污染体")
+	var pol_after := _deep_find_button(page, "作战·粉雾歌者")
 	check(pol_after.text.contains("✕") and pol_after.disabled, "同列未选标 ✕ 错失")
-	var echo_after := _deep_find_button(page, "作战·残响回廊")
+	var echo_after := _deep_find_button(page, "作战·糖丝傀儡")
 	check(echo_after != null and not echo_after.disabled, "推进后第二列可选")
-	var candle_after := _deep_find_button(page, "事件·烛台走廊")
+	var candle_after := _deep_find_button(page, "事件·合唱席")
 	check(candle_after != null and not candle_after.disabled, "第二列事件节点可选")
 	check(_deep_find_button(page, "返回主菜单") != null and _deep_find_button(page, "进入练习站") != null, "地图底部有练习站与主菜单入口")
 	check(page._route_hint.text == MapPage.ROUTE_HINT, "短线（三列 648px）不出现拖动提示")
@@ -1783,7 +1966,7 @@ func test_map_route_scroll() -> void:
 	check(scroll.vertical_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED, "纵向不滚动（只横向拉）")
 	check(scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO, "长线横向可滚（滚动条显示）")
 	# 点击首列节点（真实鼠标事件，非 pressed.emit）
-	var pol := _deep_find_button(page, "作战·污染体")
+	var pol := _deep_find_button(page, "作战·粉雾歌者")
 	check(pol != null, "首列作战节点在屏")
 	var center := pol.get_global_rect().get_center()
 	_push_mouse_button(viewport, center, true)
@@ -1823,16 +2006,19 @@ func test_map_route_scroll() -> void:
 
 
 func test_event_page() -> void:
-	print("[事件页：三选一 → 就地反馈 → 完成]")
+	print("[事件页：三选一 → 就地反馈（＋choice_chosen）→ 完成]")
 	var page := EventPage.new()
 	var viewport := _attach_scene(page)
 	await process_frame
 	var done: Array = []
+	var choices_log: Array = []
 	page.completed.connect(func() -> void: done.append(true))
-	var stage: Dictionary = _pool_event("粉雾")
+	page.choice_chosen.connect(func(index: int) -> void: choices_log.append(index))
+	var stage: Dictionary = _pool_event("试衣镜")
 	page.show_event(stage)
-	check(page._title.text == "粉雾", "标题按关卡")
-	check(page._scene.text.contains("淡粉色的雾"), "场景说明在屏上")
+	check(page._title.text == "试衣镜", "标题按关卡")
+	check(page._scene.text.contains("试衣镜"), "场景说明在屏上")
+	check(not _deep_has_text(page, "占位"), "事件页无玩法区占位提示")
 	check(page._choices_box.get_child_count() == 3, "三个选项按钮")
 	var complete_button := page._complete_button as Button
 	check(complete_button.disabled, "未选择不能完成")
@@ -1841,15 +2027,59 @@ func test_event_page() -> void:
 	check(page._feedback.text == String(stage["feedback"][0]), "选择后展出对应反馈")
 	check(not complete_button.disabled, "选择后可以完成")
 	check(choice0.disabled, "选择后选项锁定（只能选一次）")
+	check(choices_log == [0], "选择发出 choice_chosen(0)")
+	choice0.pressed.emit()
+	check(choices_log == [0], "已锁定后重复点击不再发出（三选一仅一次）")
 	complete_button.pressed.emit()
 	check(done == [true], "发出 completed")
-	# 第二个占位事件（烛台走廊）同样能上屏（等一帧清掉旧选项按钮）
-	var candle: Dictionary = _pool_event("烛台走廊")
+	# 第二个事件（合唱席）同样能上屏（等一帧清掉旧选项按钮）
+	var candle: Dictionary = _pool_event("合唱席")
 	page.show_event(candle)
 	await process_frame
-	check(page._title.text == "烛台走廊", "第二列事件节点数据完整")
-	check(page._choices_box.get_child_count() == 3, "烛台走廊三个选项")
+	check(page._title.text == "合唱席", "第二列事件节点数据完整")
+	check(page._choices_box.get_child_count() == 3, "合唱席三个选项")
 	check(page._feedback.text == "" and complete_button.disabled, "重开后反馈清空、完成按钮复位")
+	viewport.queue_free()
+	await process_frame
+
+
+# 事件效果结算链（design-round8）：choice_chosen → main_flow._on_event_choice → pending_hp_delta → 入战 HP
+func test_event_effect_flow() -> void:
+	print("[事件效果结算：选择 → 层内续航修正 → 带伤入战]")
+	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport := _attach_scene(main)
+	await process_frame
+	main.run.tutorial_done = true
+	main.run.route = _fixture_route()
+	main.run.route_layer = main.run.current_layer
+	main._open_map()
+	var map_page := main.get_node("%MapPage") as Control
+	var event_page := main.get_node("%EventPage") as Control
+	var confirm_primary := main.get_node("%ConfirmPrimaryButton") as Button
+	# 第一列·事件（试衣镜）→ 事件页；用确定性效果表覆盖（掉 1 / 稳妥 / 疗愈 1）
+	var fog := _deep_find_button(map_page, "事件·试衣镜")
+	fog.pressed.emit()
+	confirm_primary.pressed.emit()
+	check(event_page.visible, "进入事件页")
+	check(String(main._active_event.get("title", "")) == "试衣镜", "当前事件已记录（效果结算用）")
+	main._active_event = {"effects": [{"hp": -1}, {}, {"hp": 1}]}
+	(event_page._choices_box.get_child(0) as Button).pressed.emit()
+	check(main.run.pending_hp_delta == -1, "掉血选项合入续航修正（−1）")
+	(event_page._choices_box.get_child(0) as Button).pressed.emit()
+	check(main.run.pending_hp_delta == -1, "锁定后重复点击不再结算")
+	(event_page._complete_button as Button).pressed.emit()
+	check(map_page.visible, "事件完成回地图")
+	# 第二列·作战（糖丝傀儡）：带伤入场 9/10
+	var echo := _deep_find_button(map_page, "作战·糖丝傀儡")
+	echo.pressed.emit()
+	confirm_primary.pressed.emit()
+	await process_frame
+	var battle_host := main.get_node("%BattleHost") as Control
+	check(battle_host.get_child_count() == 1, "进入战斗位")
+	var battle: Variant = battle_host.get_child(0)
+	check(battle.state.enemy_name == "糖丝傀儡", "第二列作战按节点")
+	check(battle.state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "带伤入场（你：9 / 10）")
+	check((battle.get_node("%PlayerHpLabel") as Label).text == "你：9 / 10", "入战 HUD 显示带伤入场")
 	viewport.queue_free()
 	await process_frame
 
@@ -2581,7 +2811,7 @@ func test_main_flow_full() -> void:
 	var layer2_row := _deep_find_button(map_page, "第 2 层·色欲")
 	check(layer2_row != null and layer2_row.text.contains("当前"), "第 2 层当前")
 	var layer3_row := _deep_find_button(map_page, "第 3 层·暴食")
-	check(layer3_row != null and layer3_row.text.contains("待续"), "第 3 层待续")
+	check(layer3_row != null and layer3_row.text.contains("未解锁"), "第 3 层未解锁（内容楼层，前面未走完）")
 	var map_practice_button := _deep_find_button(map_page, "进入练习站")
 	check(map_practice_button != null, "地图保留练习站入口")
 	var map_title_button := _deep_find_button(map_page, "返回主菜单")
@@ -2649,7 +2879,7 @@ func test_main_menu_practice_entry() -> void:
 
 
 func test_main_flow_layer2() -> void:
-	print("[第二层路线全流程：夹具选路（含死亡重掷）→ 层主战 → 上行 → 地图（demo 边界）]")
+	print("[第二层路线全流程：夹具选路（含死亡重掷）→ 层主战 → 上行 → 地图（第 3 层解锁）]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
 	var map_page := main.get_node("%MapPage") as Control
@@ -2664,28 +2894,28 @@ func test_main_flow_layer2() -> void:
 	main.run.rng.seed = 20261005
 	main._open_map()
 	check(map_page.visible, "置教程完成后直达层地图")
-	# 第一列·事件（粉雾）：点节点＝弹确认窗，确认主按钮才入关（design-round5.md §0.2/0.4）
+	# 第一列·事件（试衣镜）：点节点＝弹确认窗，确认主按钮才入关（design-round5.md §0.2/0.4）
 	var overlay := main.get_node("%ConfirmOverlay") as Control
 	var confirm_title := main.get_node("%ConfirmTitle") as Label
 	var confirm_primary := main.get_node("%ConfirmPrimaryButton") as Button
-	var fog := _deep_find_button(map_page, "事件·粉雾")
+	var fog := _deep_find_button(map_page, "事件·试衣镜")
 	check(fog != null and not fog.disabled, "第一列事件节点当前可点")
 	fog.pressed.emit()
 	check(overlay.visible, "点节点先弹确认窗（不直接入关）")
-	check(confirm_title.text == "进入「事件·粉雾」？", "确认窗标题＝类型·名称")
+	check(confirm_title.text == "进入「事件·试衣镜」？", "确认窗标题＝类型·名称")
 	check(confirm_primary.text == "进入事件", "事件节点主按钮＝进入事件")
 	check(main.run.column_index == 0 and main.run.chosen.is_empty(), "弹窗未落账（选择推迟到确认）")
 	confirm_primary.pressed.emit()
 	check(not overlay.visible, "确认后确认窗关闭")
 	check(event_page.visible, "进入事件页")
-	check(event_page._title.text == "粉雾", "事件标题按节点")
+	check(event_page._title.text == "试衣镜", "事件标题按节点")
 	(event_page._choices_box.get_child(0) as Button).pressed.emit()
 	check(not (event_page._complete_button as Button).disabled, "选择后可以完成")
 	(event_page._complete_button as Button).pressed.emit()
 	check(map_page.visible, "事件完成回地图")
 	check(main.run.column_index == 1, "选路推进到第二列")
-	# 第二列·作战（残响回廊）→ 故意判负，验证死亡回层首重选
-	var echo := _deep_find_button(map_page, "作战·残响回廊")
+	# 第二列·作战（糖丝傀儡）→ 故意判负，验证死亡回层首重选
+	var echo := _deep_find_button(map_page, "作战·糖丝傀儡")
 	check(echo != null and not echo.disabled, "第二列作战节点当前可点")
 	echo.pressed.emit()
 	check(overlay.visible, "作战节点也弹确认窗")
@@ -2695,7 +2925,7 @@ func test_main_flow_layer2() -> void:
 	check(battle_host.get_child_count() == 1, "第二列作战进入战斗位")
 	var lost_battle: Variant = battle_host.get_child(0)
 	check(lost_battle.state.mode == BattleState.Mode.STORY, "层战模式")
-	check(lost_battle.state.enemy_name == "残响回廊" and lost_battle.state.enemy_max_hp == 16, "第二列作战按节点配置")
+	check(lost_battle.state.enemy_name == "糖丝傀儡" and lost_battle.state.enemy_max_hp == 18, "第二列作战按节点配置")
 	lost_battle.state.debug_force_plays = 5
 	var safety := 0
 	while lost_battle.state.phase == BattleState.Phase.PLAYER and safety < 20:
@@ -2708,11 +2938,11 @@ func test_main_flow_layer2() -> void:
 	check(map_page.visible, "判负回地图")
 	check(main.run.column_index == 0 and main.run.chosen.is_empty(), "死亡回层首＝选路重置")
 	check(_route_signature(main.run.current_columns()) != _route_signature(_fixture_route()), "死亡重掷＝重新生成新路线（rng 播种，可复现）")
-	# 重掷已断言；重新注入夹具，继续走固定节点（第一列·作战：污染体）
+	# 重掷已断言；重新注入夹具，继续走固定节点（第一列·作战：粉雾歌者）
 	main.run.route = _fixture_route()
 	main.run.route_layer = main.run.current_layer
 	main._open_map()
-	var pol := _deep_find_button(map_page, "作战·污染体")
+	var pol := _deep_find_button(map_page, "作战·粉雾歌者")
 	check(pol != null and not pol.disabled, "第一列作战节点当前可点")
 	pol.pressed.emit()
 	check(overlay.visible, "重掷后作战节点仍走确认窗")
@@ -2720,20 +2950,20 @@ func test_main_flow_layer2() -> void:
 	await process_frame
 	check(battle_host.get_child_count() == 1, "小怪战进入战斗位")
 	var battle: Variant = battle_host.get_child(0)
-	check(battle.state.enemy_name == "污染体" and battle.state.enemy_max_hp == 20, "小怪按节点配置")
+	check(battle.state.enemy_name == "粉雾歌者" and battle.state.enemy_max_hp == 16, "小怪按节点配置")
 	battle.state.debug_force_plays = 0
 	_press_strikes_until_over(battle)
 	check(battle.state.phase == BattleState.Phase.ENDED, "小怪战打完直接结束（不过净化）")
 	await process_frame
 	check(battle_host.get_child_count() == 0, "小怪战已释放")
 	check(map_page.visible and main.run.column_index == 1, "小怪战胜利回地图、进入第二列")
-	# 第二列改选·事件（烛台走廊）
-	var candle := _deep_find_button(map_page, "事件·烛台走廊")
+	# 第二列改选·事件（合唱席）
+	var candle := _deep_find_button(map_page, "事件·合唱席")
 	check(candle != null and not candle.disabled, "第二列事件节点当前可点")
 	candle.pressed.emit()
 	check(overlay.visible, "第二列事件也弹确认窗")
 	confirm_primary.pressed.emit()
-	check(event_page._title.text == "烛台走廊", "第二列事件标题")
+	check(event_page._title.text == "合唱席", "第二列事件标题")
 	(event_page._choices_box.get_child(1) as Button).pressed.emit()
 	(event_page._complete_button as Button).pressed.emit()
 	check(map_page.visible and main.run.column_index == 2, "事件关走完进入第三列（层主战）")
@@ -2767,10 +2997,13 @@ func test_main_flow_layer2() -> void:
 	_first_live_button(transition_page, "继续").pressed.emit()
 	check(map_page.visible, "上行后回地图")
 	check(main.run.current_layer == 3, "上行到第 3 层")
-	check(main.run.is_demo_end(), "停在 demo 边界")
+	check(not main.run.is_demo_end(), "第 3 层不是内容边界")
 	check(main.run.chosen.is_empty() and main.run.column_index == 0, "上行后选路记录清空")
 	check(_deep_find_button(map_page, "第 2 层·色欲").text.contains("已净化"), "第 2 层已净化")
-	check(_deep_find_button(map_page, "第 3 层·暴食").text.contains("待续"), "第 3 层待续")
+	var layer3_after := _deep_find_button(map_page, "第 3 层·暴食")
+	check(layer3_after != null and layer3_after.text.contains("当前"), "第 3 层解锁＝当前层并展开路线")
+	var layer8_after := _deep_find_button(map_page, "第 8 层·同位体")
+	check(layer8_after != null and layer8_after.text.contains("待续"), "第 8 层待续（本段内容边界）")
 	check(main.run.sin_cards == ["lust"], "色欲入局内收集")
 	check(main.run.companions.has("阿斯莫德"), "阿斯莫德入同行列")
 	check(main.pool.owned_count("lust") == 1, "罪卡入仓库")
@@ -2793,11 +3026,11 @@ func test_confirm_deck_flow() -> void:
 	var confirm_title := main.get_node("%ConfirmTitle") as Label
 	var confirm_primary := main.get_node("%ConfirmPrimaryButton") as Button
 	var choose_deck := main.get_node("%ChooseDeckButton") as Button
-	var pol := _deep_find_button(map_page, "作战·污染体")
+	var pol := _deep_find_button(map_page, "作战·粉雾歌者")
 	check(pol != null and not pol.disabled, "第一列作战节点可点")
 	pol.pressed.emit()
 	check(overlay.visible, "弹确认窗")
-	check(confirm_title.text == "进入「作战·污染体」？", "标题＝进入「类型·名称」？")
+	check(confirm_title.text == "进入「作战·粉雾歌者」？", "标题＝进入「类型·名称」？")
 	check(choose_deck.text == "选择牌组", "副按钮＝选择牌组（无取消键）")
 	check(main.run.chosen.is_empty() and main.run.column_index == 0, "弹窗未落账")
 	# 选择牌组 → 组卡界面（练习站）
@@ -2824,16 +3057,16 @@ func test_confirm_deck_flow() -> void:
 	(main.get_node("%LeavePracticeButton") as Button).pressed.emit()
 	check(map_page.visible, "离开组卡回地图")
 	check(overlay.visible, "回地图重新弹出该节点确认窗")
-	check(confirm_title.text == "进入「作战·污染体」？", "重弹仍是原节点")
+	check(confirm_title.text == "进入「作战·粉雾歌者」？", "重弹仍是原节点")
 	# 确认 → 落账入战，用刚组的卡组
 	confirm_primary.pressed.emit()
 	check(not overlay.visible, "确认后弹窗关闭")
-	check(main.run.column_index == 1 and main.run.chosen == [1], "确认落账并推进（污染体＝列内下标 1）")
+	check(main.run.column_index == 1 and main.run.chosen == [1], "确认落账并推进（粉雾歌者＝列内下标 1）")
 	await process_frame
 	var battle_host := main.get_node("%BattleHost") as Control
 	check(battle_host.get_child_count() == 1, "进入战斗位")
 	var battle: Variant = battle_host.get_child(0)
-	check(battle.state.enemy_name == "污染体", "按节点配置对手")
+	check(battle.state.enemy_name == "粉雾歌者", "按节点配置对手")
 	check(battle.state.draw_pile.size() + battle.state.hand.size() == BattleConfig.DECK_SIZE, "用组卡界面组的 8 张卡组")
 	viewport.queue_free()
 	await process_frame
@@ -2895,6 +3128,7 @@ func test_save_roundtrip() -> void:
 	run.add_companion("菲戈蕾")
 	run.route = _fixture_route()
 	run.route_layer = 2
+	run.apply_hp_delta(-2)
 	var pool := CardPool.new()
 	pool.collect_sin("lust")
 	pool.add_to_deck("strike")
@@ -2912,6 +3146,13 @@ func test_save_roundtrip() -> void:
 	check(pool2.deck == ["strike"], "卡组还原")
 	check(_route_signature(run2.route) == _route_signature(_fixture_route()), "路线还原")
 	check(run2.route_layer == 2 and run2.current_columns() == run2.route, "路线层号还原且不重生成")
+	check(run2.pending_hp_delta == -2, "层内续航修正还原")
+	# 旧档缺 pending_hp_delta 键：缺省 0（VERSION 2 加键向后兼容）
+	var legacy: Dictionary = data.duplicate(true)
+	legacy.erase("pending_hp_delta")
+	var run3 := RunState.new()
+	SaveGame.apply_progress(legacy, run3, CardPool.new())
+	check(run3.pending_hp_delta == 0, "旧档缺续航键默认 0")
 	var battle_node: Dictionary = run2.route[0][1]
 	check(typeof(battle_node.get("enemy_hp")) == TYPE_INT, "节点血量回读为 int（JSON float 已归一）")
 	var enemy_deck: Dictionary = battle_node.get("enemy_deck", {})
@@ -2957,7 +3198,7 @@ func test_main_flow_save_resume() -> void:
 	main2.run.route = _fixture_route()
 	main2.run.route_layer = main2.run.current_layer
 	main2._open_map()
-	var fog2 := _deep_find_button(map2, "事件·粉雾")
+	var fog2 := _deep_find_button(map2, "事件·试衣镜")
 	check(fog2 != null and not fog2.disabled, "续玩：第一列节点可点")
 	fog2.pressed.emit()
 	(main2.get_node("%ConfirmPrimaryButton") as Button).pressed.emit()
@@ -2974,9 +3215,9 @@ func test_main_flow_save_resume() -> void:
 	var map3 := main3.get_node("%MapPage") as Control
 	check(map3.visible, "再重启仍直达路线")
 	check(main3.run.column_index == 1 and main3.run.chosen == [0], "中途进度续到第二列")
-	var fog3 := _deep_find_button(map3, "事件·粉雾")
+	var fog3 := _deep_find_button(map3, "事件·试衣镜")
 	check(fog3 != null and fog3.text.contains("✓"), "已走节点续档后标 ✓")
-	var echo3 := _deep_find_button(map3, "作战·残响回廊")
+	var echo3 := _deep_find_button(map3, "作战·糖丝傀儡")
 	check(echo3 != null and not echo3.disabled, "第二列续档后可直接继续")
 	viewport3.queue_free()
 	await process_frame

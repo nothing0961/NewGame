@@ -26,6 +26,7 @@ static func save_progress(run: RunState, pool: CardPool) -> void:
 		"companions": run.companions,
 		"route": run.route,
 		"route_layer": run.route_layer,
+		"pending_hp_delta": run.pending_hp_delta,
 		"pool_owned": pool.owned,
 		"pool_deck": pool.deck,
 	}
@@ -66,6 +67,8 @@ static func apply_progress(data: Dictionary, run: RunState, pool: CardPool) -> v
 	run.companions = _to_string_array(data.get("companions", []))
 	run.route = _normalize_route(data.get("route", []))
 	run.route_layer = int(data.get("route_layer", -1))
+	# 旧档无此键：缺省 0（VERSION 不变，向后兼容）
+	run.pending_hp_delta = int(data.get("pending_hp_delta", 0))
 	if data.has("pool_owned"):
 		var owned := {}
 		var raw: Variant = data["pool_owned"]

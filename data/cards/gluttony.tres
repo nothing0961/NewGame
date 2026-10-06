@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "gluttony"
+display_name = "暴食"
+kind = 4
+cost = 6
+text = "造成 4 点伤害，并恢复 4 点生命。\n解锁后每场战斗仅能打出一次；打出后它不再离开你。"
+flavor = "越吃越饿。现在它认你了。"
+permanent = true
+effects = Array[Dictionary]([{
+"op": "deal_damage",
+"amount": 4
+}, {
+"op": "heal",
+"amount": 4
+}])

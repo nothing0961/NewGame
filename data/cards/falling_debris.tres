@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "falling_debris"
+display_name = "坠落的残石"
+kind = 3
+cost = 6
+text = "造成 3 点伤害。"
+flavor = ""
+permanent = false
+effects = Array[Dictionary]([{
+"op": "deal_damage",
+"amount": 3
+}])

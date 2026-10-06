@@ -2,9 +2,10 @@ class_name EventPage
 extends Control
 
 # 事件页＝容器（design/design-round3.md §4）：标题＋场景说明＋玩法区（宿主，可注入小玩法模块）＋完成按钮。
-# 首版占位壳：玩法区放最小三选一交互（选一个→就地占位反馈→可完成）。真实小玩法待专轮设计。
+# 现为最小三选一交互（选一个→就地反馈→可完成）；选项附轻量效果（design-round8，由 main_flow 经 choice_chosen 结算）。
 
 signal completed()
+signal choice_chosen(index: int)
 
 var _title: Label
 var _scene: Label
@@ -54,12 +55,6 @@ func _build_static_ui() -> void:
 	var play_box := VBoxContainer.new()
 	play_box.add_theme_constant_override("separation", 10)
 	play_margin.add_child(play_box)
-	var hint := Label.new()
-	hint.text = "—— 玩法区（占位）——"
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 14)
-	hint.modulate = Color(1, 1, 1, 0.6)
-	play_box.add_child(hint)
 	_choices_box = VBoxContainer.new()
 	_choices_box.add_theme_constant_override("separation", 8)
 	play_box.add_child(_choices_box)
@@ -99,7 +94,7 @@ func show_event(stage: Dictionary) -> void:
 
 func _on_choice(index: int, feedback: Array) -> void:
 	if _chosen >= 0:
-		return  # 占位小玩法：三选一，只能选一次
+		return  # 三选一，只能选一次
 	_chosen = index
 	if index < feedback.size():
 		_feedback.text = String(feedback[index])
@@ -107,3 +102,4 @@ func _on_choice(index: int, feedback: Array) -> void:
 	for child in _choices_box.get_children():
 		if child is Button:
 			child.disabled = true
+	choice_chosen.emit(index)

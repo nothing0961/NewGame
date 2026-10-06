@@ -69,13 +69,19 @@ const TEACHING_DECK := ["guard", "strike", "strike", "heal", "strike", "cleanse"
 const TEACHING_SLEEP_DELAY := 2
 
 # 罪卡规则（design/design-round1.md §1）：任务达成或第 SIN_ROUND_FALLBACK 回合保底解锁；每场战斗仅出现并使用一次
-# 任务/保底参数按卡配置（design/design-round3.md §6：按牌组中的罪卡逐卡检定）
+# 任务/保底参数按卡配置（design/design-round3.md §6：按牌组中的罪卡逐卡检定；
+# gluttony–anger 为 design-round8 先行版数值，待罪卡专轮替换）
 const SIN_CARD_ID := "wrath"
 const SIN_ROUND_FALLBACK := 8
 const SIN_TASK_ATTACK := "attack_plays"
 const SIN_TASK_CONFIG := {
 	"wrath": {"task": SIN_TASK_ATTACK, "count": 3},
-	"lust": {"task": SIN_TASK_ATTACK, "count": 2},  # 【测试内容】占位，随第二层设计轮替换
+	"lust": {"task": SIN_TASK_ATTACK, "count": 2},
+	"gluttony": {"task": SIN_TASK_ATTACK, "count": 3},
+	"greed": {"task": SIN_TASK_ATTACK, "count": 3},
+	"envy": {"task": SIN_TASK_ATTACK, "count": 2},
+	"pride": {"task": SIN_TASK_ATTACK, "count": 3},
+	"anger": {"task": SIN_TASK_ATTACK, "count": 4},
 }
 const TEXT_SIN_TASK := "本场战斗中累计打出 %d 张攻击牌"
 const TEXT_SIN_PROGRESS := "（%d/%d）"

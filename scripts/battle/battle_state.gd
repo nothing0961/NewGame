@@ -91,6 +91,7 @@ var sin_used_this_battle := false
 var deck_sin_id := ""
 
 var _stage: Dictionary = {}
+var _entry_hp := -1
 
 
 func start(custom_deck: Array = []) -> void:
@@ -104,8 +105,10 @@ func start_practice(custom_deck: Array = []) -> void:
 
 
 # 层内关卡战：stage 来自当前层路线（LayerConfig.generate_route 的池抽取节点）的所选节点（enemy / enemy_hp / enemy_deck / boss / sin_card / strip_lines / purify_lines）
-func start_story(custom_deck: Array, stage: Dictionary) -> void:
+# entry_hp：层内续航修正后的入场 HP（design-round8）；-1＝用满血默认值
+func start_story(custom_deck: Array, stage: Dictionary, entry_hp := -1) -> void:
 	_stage = stage
+	_entry_hp = entry_hp
 	_setup(Mode.STORY, custom_deck)
 
 
@@ -482,7 +485,12 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 	pending_sleep = false
 	sleep_deadline_turn = 0
 	sleep_immune = false
-	player_hp = BattleConfig.TEACHING_PLAYER_HP if mode == Mode.TEACHING else BattleConfig.PLAYER_MAX_HP
+	if mode == Mode.TEACHING:
+		player_hp = BattleConfig.TEACHING_PLAYER_HP
+	elif mode == Mode.STORY and _entry_hp > 0:
+		player_hp = _entry_hp
+	else:
+		player_hp = BattleConfig.PLAYER_MAX_HP
 	max_cost = BattleConfig.TEACHING_MAX_COST if mode == Mode.TEACHING else BattleConfig.PLAYER_MAX_COST
 	player_cost = max_cost
 	player_block = 0

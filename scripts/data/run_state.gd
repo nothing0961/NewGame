@@ -21,6 +21,8 @@ var companions: Array[String] = []
 var rng := RandomNumberGenerator.new()
 var route: Array = []
 var route_layer := -1
+# 层内续航修正（design-round8）：事件选项合入；掉血为负、回血抵消至多 0
+var pending_hp_delta := 0
 
 
 func _init() -> void:
@@ -76,6 +78,17 @@ func reset_layer() -> void:
 	# 死亡重掷：路线缓存失效，下次读取时重新生成（design-round4.md §3）
 	route = []
 	route_layer = -1
+	# 层开始（complete_layer 内）/死亡重掷/层完成共用此入口：入场 HP 修正统一清零
+	pending_hp_delta = 0
+
+
+# 事件效果合入层内续航修正：clamp 到 [-9, 0]（入场 HP 至少留 1）
+func apply_hp_delta(delta: int) -> void:
+	pending_hp_delta = clampi(pending_hp_delta + delta, -9, 0)
+
+
+func entry_hp() -> int:
+	return BattleConfig.PLAYER_MAX_HP + pending_hp_delta
 
 
 # 层内路线打完 → 上行；超过 MAX_LAYER 后停在 MAX_LAYER + 1（demo 边界）
@@ -106,6 +119,6 @@ func is_layer_cleared(layer: int) -> bool:
 	return tutorial_done and layer < current_layer
 
 
-# 教程完成后的地图是否已到内容边界（第三层·待续）
+# 教程完成后的地图是否已到内容边界（第 8 层·同位体终局待专轮）
 func is_demo_end() -> bool:
 	return tutorial_done and not LayerConfig.has_content(current_layer)

@@ -32,6 +32,8 @@ var _battle: Control = null
 # 确认窗待定节点：点节点只备忘，确认主按钮才 choose 落账（design-round5.md §0.4）
 var _pending_node_index := -1
 var _pending_stage: Dictionary = {}
+# 当前事件节点（选项效果结算用；不写回共享池字典）
+var _active_event: Dictionary = {}
 
 
 func _ready() -> void:
@@ -42,6 +44,7 @@ func _ready() -> void:
 	map_page.practice_requested.connect(_open_practice_from_map)
 	map_page.menu_requested.connect(_return_to_title)
 	event_page.completed.connect(_on_event_completed)
+	event_page.choice_chosen.connect(_on_event_choice)
 	transition_page.continued.connect(_open_map)
 	prologue_page.finished.connect(_on_prologue_finished)
 	confirm_primary_button.pressed.connect(_on_confirm_primary)
@@ -180,14 +183,25 @@ func _enter_stage(stage: Dictionary) -> void:
 		if pool.is_deck_valid():
 			deck = pool.deck.duplicate()
 		_battle_context = "story"
-		_start_battle(BattleState.Mode.STORY, deck, stage)
+		_start_battle(BattleState.Mode.STORY, deck, stage, run.entry_hp())
 	else:
+		_active_event = stage
 		event_page.show_event(stage)
 		_show_page(Page.EVENT)
 
 
 func _on_event_completed() -> void:
 	_after_route_step()
+
+
+# 事件选项效果（design-round8）：本轮词汇仅 hp（正＝疗愈、负＝代价）；
+# int() 兜 JSON 存档往返的 float
+func _on_event_choice(index: int) -> void:
+	var effects: Array = _active_event.get("effects", [])
+	if index < 0 or index >= effects.size():
+		return
+	var effect: Dictionary = effects[index]
+	run.apply_hp_delta(int(effect.get("hp", 0)))
 
 
 # 一步走完：路线走完＝层完成（上行过渡），否则回地图继续选路；走完即存盘（design-round5.md §1）
@@ -201,9 +215,9 @@ func _after_route_step() -> void:
 	SaveGame.save_progress(run, pool)
 
 
-func _start_battle(mode: int, deck: Array, stage: Dictionary = {}) -> void:
+func _start_battle(mode: int, deck: Array, stage: Dictionary = {}, entry_hp := -1) -> void:
 	_battle = BATTLE_SCENE.instantiate()
-	_battle.configure(mode, deck, stage)
+	_battle.configure(mode, deck, stage, entry_hp)
 	_battle.battle_ended.connect(_on_battle_ended)
 	_battle.battle_lost.connect(_on_battle_lost)
 	_show_page(Page.BATTLE)

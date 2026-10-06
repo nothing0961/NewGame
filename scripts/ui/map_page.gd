@@ -2,8 +2,9 @@ class_name MapPage
 extends Control
 
 # 层地图页（design/design-round3.md §2；层内路线图见 design/design-round4.md）：
-# 八层竖向（第 8 层顶、第 1 层底），三态——已过层点亮「已净化」；当前层高亮并展开
-# 分支路线图（横向列，列内节点竖排；节点四态：✓已走／✕错失／当前可选／未到置灰）；未解锁层暗色锁定。
+# 八层竖向（第 8 层顶、第 1 层底），四态——已过层点亮「已净化」；当前层高亮并展开
+# 分支路线图（横向列，列内节点竖排；节点四态：✓已走／✕错失／当前可选／未到置灰）；
+# 未解锁层暗色锁定（有内容＝「未解锁」，无内容＝「待续」＝本段内容边界）。
 # 实现形态：程序化绘制（正式美术属美术轮）。
 
 signal node_requested(index: int)
@@ -81,29 +82,31 @@ func build(run_state: RunState) -> void:
 			_list.add_child(_make_route_section(run_state))
 
 
+# 层行四态：已净化／当前／未解锁（有内容、前面未走完）/ 待续（无内容＝本段内容边界）
 func _make_layer_row(layer: int, run_state: RunState) -> Control:
 	var cleared := run_state.is_layer_cleared(layer)
 	var current := layer == run_state.current_layer and run_state.is_layer_unlocked(layer)
 	var button := Button.new()
 	button.add_theme_font_size_override("font_size", 18)
 	var line := "第 %d 层·%s　%s" % [layer, LayerConfig.layer_name(layer), LayerConfig.demon_name(layer)]
-	if cleared:
-		line += "　已净化"
-	elif current:
-		line += "　当前"
-	else:
-		line += "　待续"
-	button.text = line
 	button.disabled = true
 	if cleared:
+		line += "　已净化"
 		button.add_theme_color_override("font_disabled_color", COLOR_CLEARED)
 	elif current:
+		line += "　当前"
 		button.add_theme_color_override("font_disabled_color", COLOR_CURRENT)
 	else:
 		button.add_theme_color_override("font_disabled_color", COLOR_LOCKED)
 		button.disabled = false
 		button.add_theme_color_override("font_color", COLOR_LOCKED)
-		button.pressed.connect(_show_toast.bind("这一层的路还没亮起来——待续。"))
+		if LayerConfig.has_content(layer):
+			line += "　未解锁"
+			button.pressed.connect(_show_toast.bind("先走完前面的层，这里才会亮起来。"))
+		else:
+			line += "　待续"
+			button.pressed.connect(_show_toast.bind("这一层的路还没亮起来——待续。"))
+	button.text = line
 	return button
 
 
