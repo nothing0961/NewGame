@@ -155,7 +155,7 @@ func _build_name_label() -> void:
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	# 合成牌名可能很长（打击＋重击＋打击），字号随字数收缩
+	# 合成牌名可能很长（普通魔弹＋强力魔弹＋普通魔弹），字号随字数收缩
 	label.add_theme_font_size_override("font_size", clampi(17 - card.display_name.length(), 10, 14))
 	label.add_theme_color_override("font_color", NAME_INK)
 	label.set_anchors_preset(Control.PRESET_TOP_LEFT)
@@ -208,6 +208,8 @@ static func _frame_texture(kind: int) -> Texture2D:
 		CardData.Kind.DEFENSE:
 			file_name = "frame_defense"
 		CardData.Kind.SIN:
+			file_name = "frame_sin"
+		CardData.Kind.CORE:
 			file_name = "frame_sin"
 	if _frame_cache.has(file_name):
 		return _frame_cache[file_name] as Texture2D

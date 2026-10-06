@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_card")
 id = "bulwark"
-display_name = "筑壁"
+display_name = "坚壁"
 kind = 5
 cost = 1
 text = "弃掉：获得 3 点格挡。"

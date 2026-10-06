@@ -6,7 +6,8 @@ extends RefCounted
 # 测试：置 disabled=true 屏蔽自动读写；需要真读写的用例改 save_path 到独立文件。
 
 const DEFAULT_SAVE_PATH := "user://save.json"
-const VERSION := 1
+# VERSION 2（design-round6）：仓库新增 治疗术/净化/强欲魔弹，旧档（v1）拒载重走教程
+const VERSION := 2
 
 static var save_path := DEFAULT_SAVE_PATH
 static var disabled := false

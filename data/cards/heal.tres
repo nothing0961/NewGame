@@ -4,14 +4,14 @@
 
 [resource]
 script = ExtResource("1_card")
-id = "shift"
-display_name = "灵感"
+id = "heal"
+display_name = "治疗术"
 kind = 2
 cost = 1
-text = "抽 2 张牌。"
-flavor = "牌在指间换了个姿势。"
+text = "恢复 3 点生命。"
+flavor = "从树上摔下来的那点疼，很快就散了。"
 permanent = false
 effects = Array[Dictionary]([{
-"op": "draw_cards",
-"amount": 2
+"op": "heal",
+"amount": 3
 }])

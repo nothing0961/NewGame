@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_card")
 id = "quench"
-display_name = "淬火"
+display_name = "灼印"
 kind = 5
 cost = 1
 text = "弃掉：本回合伤害 +2。"

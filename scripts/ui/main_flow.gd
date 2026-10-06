@@ -2,7 +2,7 @@ extends Control
 
 const BATTLE_SCENE := preload("res://scenes/battle.tscn")
 
-enum Page { STORY, PRACTICE, BATTLE, MAP, EVENT, TRANSITION }
+enum Page { STORY, PRACTICE, BATTLE, MAP, EVENT, TRANSITION, PROLOGUE }
 
 # 主菜单「练习站」入口标记：主菜单置位 → 本场景 _ready 消费后直开练习站（离开时回主菜单）
 static var open_practice_on_ready := false
@@ -16,6 +16,7 @@ static var open_practice_on_ready := false
 @onready var map_page: MapPage = %MapPage
 @onready var event_page: EventPage = %EventPage
 @onready var transition_page: TransitionPage = %TransitionPage
+@onready var prologue_page: ProloguePage = %ProloguePage
 @onready var confirm_overlay: Control = %ConfirmOverlay
 @onready var confirm_title: Label = %ConfirmTitle
 @onready var confirm_primary_button: Button = %ConfirmPrimaryButton
@@ -26,8 +27,7 @@ var run := RunState.new()
 var _primary_action: Callable = Callable()
 var _secondary_action: Callable = Callable()
 var _practice_return: Callable = Callable()
-var _teach_seen := false
-var _battle_context := ""  # "tutorial" / "story" / "practice"
+var _battle_context := ""  # "tutorial" / "story" / "practice" / "teaching"
 var _battle: Control = null
 # 确认窗待定节点：点节点只备忘，确认主按钮才 choose 落账（design-round5.md §0.4）
 var _pending_node_index := -1
@@ -43,6 +43,7 @@ func _ready() -> void:
 	map_page.menu_requested.connect(_return_to_title)
 	event_page.completed.connect(_on_event_completed)
 	transition_page.continued.connect(_open_map)
+	prologue_page.finished.connect(_on_prologue_finished)
 	confirm_primary_button.pressed.connect(_on_confirm_primary)
 	choose_deck_button.pressed.connect(_on_confirm_deck)
 	if open_practice_on_ready:
@@ -58,26 +59,27 @@ func _ready() -> void:
 		if run.tutorial_done:
 			_open_map()
 		else:
-			_show_intro()
+			_show_prologue()
 
 
-func _show_intro() -> void:
-	_show_story(BattleConfig.TEXT_INTRO, "继续", _continue_story)
+# 初幕演出（design-round6）：小组脚本全文分拍；演出结束直接进蜗牛教学战
+func _show_prologue() -> void:
+	prologue_page.start()
+	_show_page(Page.PROLOGUE)
 
 
-# 告知「继续」按进度直达：教程完成→层地图；看过教学→转化段；未看→教学说明（入口菜单页已废除）
-func _continue_story() -> void:
-	if run.tutorial_done:
-		_open_map()
-	elif _teach_seen:
-		_show_transform()
-	else:
-		_show_teach()
+func _on_prologue_finished() -> void:
+	_start_teaching_battle()
+
+
+# 蜗牛教学战（单位制 4；胜利后进教学说明）
+func _start_teaching_battle() -> void:
+	_battle_context = "teaching"
+	_start_battle(BattleState.Mode.TEACHING, [])
 
 
 func _show_teach() -> void:
-	_teach_seen = true
-	_show_story(BattleConfig.TEXT_TEACH, "去练习站", _open_practice_from_teach, "直接去台阶", _show_transform)
+	_show_story(BattleConfig.TEXT_TEACH, "去练习站", _open_practice_from_teach, "直接前进", _show_transform)
 
 
 func _open_practice_from_teach() -> void:
@@ -230,7 +232,9 @@ func _on_battle_ended(practice: bool) -> void:
 	if practice:
 		_open_practice()
 		return
-	if _battle_context == "tutorial":
+	if _battle_context == "teaching":
+		_show_teach()
+	elif _battle_context == "tutorial":
 		_finish_tutorial()
 	else:
 		_finish_story_stage(collected)
@@ -238,7 +242,7 @@ func _on_battle_ended(practice: bool) -> void:
 
 func _finish_tutorial() -> void:
 	run.tutorial_done = true
-	run.add_companion(LayerConfig.demon_name(LayerConfig.TUTORIAL_LAYER))
+	run.add_companion(LayerConfig.LAYER1_COMPANION)
 	SaveGame.save_progress(run, pool)
 	_show_transition(BattleConfig.TEXT_ENDING)
 
@@ -251,9 +255,12 @@ func _finish_story_stage(collected: Array[String]) -> void:
 
 func _on_battle_lost() -> void:
 	_free_battle()
-	if _battle_context == "tutorial":
-		# 教程层首段＝召唤告知（提案待复核，design/design-round3.md §5）
-		_show_intro()
+	if _battle_context == "teaching":
+		# 教学战失败＝原地重开本战（design-round6；不重看初幕演出）
+		_start_teaching_battle()
+	elif _battle_context == "tutorial":
+		# 教程层主战失败＝回追及段重来（design-round6；不再回初幕演出）
+		_show_transform()
 	else:
 		# 死亡回层首＝回第一列重新选路（design-round4.md §0）
 		run.reset_layer()
@@ -299,3 +306,4 @@ func _show_page(page: int) -> void:
 	map_page.visible = page == Page.MAP
 	event_page.visible = page == Page.EVENT
 	transition_page.visible = page == Page.TRANSITION
+	prologue_page.visible = page == Page.PROLOGUE

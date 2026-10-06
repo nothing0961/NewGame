@@ -39,10 +39,15 @@ func _initialize() -> void:
 	test_card_pool_sin()
 	test_story_battle_small()
 	test_story_battle_boss()
+	test_multi_enemy_helpers()
+	test_teaching_battle_logic()
+	test_teaching_sleep_timeout()
 	# 等一帧让 SceneTree 进入运行态，节点加入 root 时 _ready 才会立即执行
 	await process_frame
 	await test_battle_scene_tutorial()
 	await test_battle_scene_practice()
+	await test_teaching_battle_scene()
+	await test_prologue_page()
 	await test_battle_scene_defeat()
 	await test_map_page()
 	await test_map_route_scroll()
@@ -62,6 +67,7 @@ func _initialize() -> void:
 	await test_main_menu_practice_entry()
 	await test_main_flow_layer2()
 	await test_confirm_deck_flow()
+	await test_teaching_defeat_restart()
 	test_save_roundtrip()
 	await test_main_flow_save_resume()
 	if failures == 0:
@@ -315,7 +321,7 @@ func _push_wheel(target: Viewport, at_point: Vector2, down: bool) -> void:
 	target.push_input(event)
 
 
-# 像玩家一样：拖手牌里的打击进出牌区，摆完按「打出」，打不出就结束回合，直到战斗不再是玩家回合
+# 像玩家一样：拖手牌里的普通魔弹进出牌区，摆完按「打出」，打不出就结束回合，直到战斗不再是玩家回合
 func _press_strikes_until_over(scene: Variant) -> void:
 	var hand_box := scene.get_node("%HandBox") as Control
 	var play_box := scene.get_node("%PlayBox") as HBoxContainer
@@ -339,9 +345,29 @@ func _press_strikes_until_over(scene: Variant) -> void:
 		end_turn_button.pressed.emit()
 
 
+# 教学战推进到波 2 登场：R1 整批（防住＋两发魔弹＋治疗）→ R2 补刀 → 三只群怪沉睡（第 3 回合）
+func _teaching_reach_wave2(state: BattleState) -> void:
+	state.stage_card(_find_card(state.hand, "guard"))
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "heal"))
+	state.commit_staged()
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.commit_staged()
+
+
+# 教学战钉死节拍全通：R1 整批 → R2 补刀（波 2 沉睡登场）→ R3 净化免疫＋强欲魔弹（对沉睡 3＋2）清场
+func _drive_teaching_victory(scene: Variant) -> void:
+	var state: BattleState = scene.state
+	_teaching_reach_wave2(state)
+	state.stage_card(_find_card(state.hand, "cleanse"))
+	state.stage_card(_find_card(state.hand, "greed_shot"))
+	state.commit_staged()
+
+
 func test_cards_load() -> void:
 	print("[卡牌数据]")
-	for card_id in ["strike", "heavy_strike", "guard", "strong_guard", "call", "shift", "wrath", "enemy_strike", "quench", "surge", "bulwark"]:
+	for card_id in ["strike", "heavy_strike", "guard", "strong_guard", "call", "shift", "wrath", "enemy_strike", "quench", "surge", "bulwark", "heal", "cleanse", "greed_shot", "snail_bite"]:
 		var card := CardDB.get_card(card_id)
 		check(card != null, "载入 " + card_id)
 		if card != null:
@@ -351,22 +377,31 @@ func test_cards_load() -> void:
 			else:
 				check(not card.effects.is_empty(), card_id + " 有效果")
 	var wrath := CardDB.get_card("wrath")
-	check(wrath.permanent, "暴怒是永久牌")
-	check(wrath.kind == CardData.Kind.SIN, "暴怒是罪牌")
-	check(CardDB.get_card("strike").kind == CardData.Kind.ATTACK, "打击是攻击牌")
-	check(CardDB.get_card("heavy_strike").kind == CardData.Kind.ATTACK, "重击是攻击牌")
-	check(CardDB.get_card("guard").kind == CardData.Kind.DEFENSE, "护住是防御牌")
-	check(CardDB.get_card("strong_guard").kind == CardData.Kind.DEFENSE, "坚守是防御牌")
-	check(CardDB.get_card("call").kind == CardData.Kind.UTILITY, "呼喊是功能牌")
-	check(CardDB.get_card("shift").kind == CardData.Kind.UTILITY, "转换是功能牌")
-	check(CardDB.get_card("quench").kind == CardData.Kind.AMPLIFY, "淬火是增幅牌")
-	check(CardDB.get_card("surge").kind == CardData.Kind.AMPLIFY, "蓄能是增幅牌")
-	check(CardDB.get_card("bulwark").kind == CardData.Kind.AMPLIFY, "筑壁是增幅牌")
+	check(wrath.permanent, "懒惰是永久牌")
+	check(wrath.kind == CardData.Kind.SIN, "懒惰是罪牌")
+	check(CardDB.get_card("strike").kind == CardData.Kind.ATTACK, "普通魔弹是攻击牌")
+	check(CardDB.get_card("heavy_strike").kind == CardData.Kind.ATTACK, "强力魔弹是攻击牌")
+	check(CardDB.get_card("guard").kind == CardData.Kind.DEFENSE, "普通防御是防御牌")
+	check(CardDB.get_card("strong_guard").kind == CardData.Kind.DEFENSE, "坚固防御是防御牌")
+	check(CardDB.get_card("call").kind == CardData.Kind.UTILITY, "震慑是功能牌")
+	check(CardDB.get_card("shift").kind == CardData.Kind.UTILITY, "灵感是功能牌")
+	check(CardDB.get_card("quench").kind == CardData.Kind.AMPLIFY, "灼印是增幅牌")
+	check(CardDB.get_card("surge").kind == CardData.Kind.AMPLIFY, "蓄流是增幅牌")
+	check(CardDB.get_card("bulwark").kind == CardData.Kind.AMPLIFY, "坚壁是增幅牌")
 	check(CardDB.get_card("quench").kind_label() == "功能", "卡型标签：增幅呈现并入功能")
 	check(CardDB.get_card("quench").cost == 1, "增幅牌 Cost 1")
 	check(CardDB.get_card("heavy_strike").kind_label() == "攻击", "卡型标签：攻击")
 	check(CardDB.get_card("shift").kind_label() == "功能", "卡型标签：功能")
 	check(CardDB.get_card("wrath").kind_label() == "罪", "卡型标签：罪")
+	check(CardDB.get_card("heal").kind == CardData.Kind.UTILITY, "治疗术是功能牌")
+	check(CardDB.get_card("cleanse").kind == CardData.Kind.UTILITY, "净化是功能牌")
+	check(CardDB.get_card("greed_shot").kind == CardData.Kind.CORE, "强欲魔弹是核心牌")
+	check(CardDB.get_card("greed_shot").kind_label() == "核心", "卡型标签：核心")
+	check(CardDB.get_card("wrath").display_name == "懒惰", "暴怒旧名已改为懒惰")
+	check(CardDB.get_card("lust").display_name == "色欲", "色欲显示名")
+	check(CardDB.get_card("lust").kind == CardData.Kind.SIN, "色欲是罪牌")
+	check(CardDB.get_card("snail_bite").display_name == "蜗牛撞击", "蜗牛撞击显示名")
+	check(CardDB.get_card("snail_bite").kind == CardData.Kind.ENEMY, "蜗牛撞击是敌牌")
 
 
 func test_wrath_effects() -> void:
@@ -375,16 +410,16 @@ func test_wrath_effects() -> void:
 	state.debug_force_plays = 0
 	state.sin_available = true
 	state.gain_card(CardDB.get_card("wrath"))
-	check(state.stage_card(_find_card(state.hand, "wrath")), "暴怒可以摆进出牌区")
+	check(state.stage_card(_find_card(state.hand, "wrath")), "懒惰可以摆进出牌区")
 	check(state.staged_cost() == 6, "出牌区合计 Cost 6")
 	check(state.commit_staged(), "打出整批")
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 3, "暴怒直接造成 3 伤")
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 3, "懒惰直接造成 3 伤")
 	check(state.attack_bonus == 1, "攻击加成 +1")
 	check(state.collection.has(CardDB.get_card("wrath")), "罪牌留在面前而不是进弃牌堆")
 	check(state.phase == BattleState.Phase.PLAYER, "打出后已是新回合")
-	check(state.stage_card(_find_card(state.hand, "strike")), "新回合摆一张打击")
+	check(state.stage_card(_find_card(state.hand, "strike")), "新回合摆一张普通魔弹")
 	state.commit_staged()
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 6, "打击吃到加成(3 伤)")
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 6, "普通魔弹吃到加成(3 伤)")
 
 
 func test_sin_unlock_rules() -> void:
@@ -452,23 +487,23 @@ func test_sin_unlock_rules() -> void:
 
 
 func test_new_card_effects() -> void:
-	print("[新卡：重击 4 伤 / 坚守 3 格挡 / 转换抽 2]")
+	print("[新卡：强力魔弹 4 伤 / 坚固防御 3 格挡 / 灵感抽 2]")
 	var state := _make_state()
 	state.debug_force_plays = 0
 	state.hand.clear()
 	state.hand.append(CardDB.get_card("heavy_strike"))
 	state.stage_card(0)
 	state.commit_staged()
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 4, "重击 4 伤")
-	# 坚守的格挡在「打出→敌人回合」之间生效；回合结束后清零，用击穿线反推本回合格挡量
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 4, "强力魔弹 4 伤")
+	# 坚固防御的格挡在「打出→敌人回合」之间生效；回合结束后清零，用击穿线反推本回合格挡量
 	var state_g := _make_state()
 	state_g.debug_force_plays = 2
 	state_g.hand.clear()
 	state_g.hand.append(CardDB.get_card("strong_guard"))
 	state_g.stage_card(0)
 	state_g.commit_staged()
-	check(state_g.player_hp == BattleConfig.PLAYER_MAX_HP, "坚守 3 格挡挡下对方 2 点（同批结算生效）")
-	# 转换：抽 2 张进手；结算后过一轮，弃牌堆洗回再摸 1 张（供给见底能摸几张是几张）
+	check(state_g.player_hp == BattleConfig.PLAYER_MAX_HP, "坚固防御 3 格挡挡下对方 2 点（同批结算生效）")
+	# 灵感：抽 2 张进手；结算后过一轮，弃牌堆洗回再摸 1 张（供给见底能摸几张是几张）
 	var state2 := _make_state()
 	state2.debug_force_plays = 0
 	state2.hand.clear()
@@ -479,8 +514,8 @@ func test_new_card_effects() -> void:
 	state2.draw_pile.append(CardDB.get_card("guard"))
 	state2.stage_card(0)
 	state2.commit_staged()
-	check(state2.hand.size() == 3, "转换抽 2 张＋弃牌堆洗回再摸 1 张＝3 张")
-	check(_find_card(state2.hand, "strike") >= 0 and _find_card(state2.hand, "guard") >= 0, "抽到的打击与护住都在手")
+	check(state2.hand.size() == 3, "灵感抽 2 张＋弃牌堆洗回再摸 1 张＝3 张")
+	check(_find_card(state2.hand, "strike") >= 0 and _find_card(state2.hand, "guard") >= 0, "抽到的普通魔弹与普通防御都在手")
 	var logs: Array = []
 	var state3 := _make_state(logs)
 	state3.debug_force_plays = 0
@@ -495,16 +530,16 @@ func test_new_card_effects() -> void:
 
 
 func test_guard_blocks_enemy_plays() -> void:
-	print("[护住 vs 对方出牌：同批结算后紧接着的对方回合被挡下]")
+	print("[普通防御 vs 对方出牌：同批结算后紧接着的对方回合被挡下]")
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 2
-	# 开局手牌从 8 张牌组随机摸 5，钉死手牌保证有护住
+	# 开局手牌从 8 张牌组随机摸 5，钉死手牌保证有普通防御
 	state.hand.clear()
 	state.hand.append(CardDB.get_card("guard"))
 	state.stage_card(0)
 	state.commit_staged()
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP, "对方两张占位牌共 2 点伤害被同批打出的护住完整挡下")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP, "对方两张占位牌共 2 点伤害被同批打出的普通防御完整挡下")
 	check(state.player_block == 0, "格挡正好用掉；新回合格挡清零")
 	check(state.phase != BattleState.Phase.DEFEAT, "没有倒下")
 	check(_log_contains(logs, "挡"), "日志记录了挡下")
@@ -512,11 +547,11 @@ func test_guard_blocks_enemy_plays() -> void:
 
 
 func test_call_suppresses() -> void:
-	print("[呼喊：同批结算后紧接着的对方回合不打人]")
+	print("[震慑：同批结算后紧接着的对方回合不打人]")
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 2
-	# 开局手牌从 8 张牌组随机摸 5，钉死手牌保证有呼喊
+	# 开局手牌从 8 张牌组随机摸 5，钉死手牌保证有震慑
 	state.hand.clear()
 	state.hand.append(CardDB.get_card("call"))
 	state.stage_card(0)
@@ -524,15 +559,15 @@ func test_call_suppresses() -> void:
 	check(state.player_hp == BattleConfig.PLAYER_MAX_HP, "换来的这一回合没有挨打")
 	check(not state.enemy_suppressed, "压制在本次对方回合用掉")
 	check(_log_contains(logs, "……对不起"), "她说了题眼那句")
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP, "呼喊不伤她")
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP, "震慑不伤她")
 
 
 func test_card_costs() -> void:
 	print("[卡牌 Cost]")
-	check(CardDB.get_card("strike").cost == 1, "打击 Cost 1")
-	check(CardDB.get_card("guard").cost == 1, "护住 Cost 1")
-	check(CardDB.get_card("call").cost == 1, "呼喊 Cost 1")
-	check(CardDB.get_card("wrath").cost == 6, "暴怒（罪牌）Cost 6")
+	check(CardDB.get_card("strike").cost == 1, "普通魔弹 Cost 1")
+	check(CardDB.get_card("guard").cost == 1, "普通防御 Cost 1")
+	check(CardDB.get_card("call").cost == 1, "震慑 Cost 1")
+	check(CardDB.get_card("wrath").cost == 6, "懒惰（罪牌）Cost 6")
 
 
 func test_cost_pool() -> void:
@@ -540,7 +575,7 @@ func test_cost_pool() -> void:
 	var state := _make_state()
 	state.debug_force_plays = 0
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "开局满 Cost（12/12）")
-	check(state.stage_card(_find_card(state.hand, "strike")), "打击可以摆进出牌区")
+	check(state.stage_card(_find_card(state.hand, "strike")), "普通魔弹可以摆进出牌区")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "摆放不扣 Cost（12/12）")
 	check(state.staged_cost() == 1, "出牌区合计 Cost 1")
 	check(state.recall_card(0), "可以收回")
@@ -550,13 +585,13 @@ func test_cost_pool() -> void:
 	state.sin_available = true  # 本测试只考 Cost 门槛，先放行罪卡检定
 	state.hand.append(CardDB.get_card("wrath"))
 	var wrath_index := _find_card(state.hand, "wrath")
-	check(not state.can_stage(state.hand[wrath_index]), "Cost 不够摆不进暴怒（需 6 剩 5）")
+	check(not state.can_stage(state.hand[wrath_index]), "Cost 不够摆不进懒惰（需 6 剩 5）")
 	check(not state.stage_card(wrath_index), "摆放被拒")
 	check(state.player_cost == 5, "被拒时不扣 Cost")
-	check(state.can_afford(CardDB.get_card("strike")), "打击还打得动")
-	check(not state.can_afford(CardDB.get_card("wrath")), "暴怒打不动")
+	check(state.can_afford(CardDB.get_card("strike")), "普通魔弹还打得动")
+	check(not state.can_afford(CardDB.get_card("wrath")), "懒惰打不动")
 	state.player_cost = 10
-	check(state.stage_card(_find_card(state.hand, "strike")), "重新摆一张打击")
+	check(state.stage_card(_find_card(state.hand, "strike")), "重新摆一张普通魔弹")
 	check(state.staged_cost() == 1, "合计 Cost 1")
 	check(state.player_cost == 10, "结算前不扣")
 	check(state.commit_staged(), "打出结算这批")
@@ -575,7 +610,7 @@ func test_defeat_flow() -> void:
 		state.end_turn()
 	check(state.phase == BattleState.Phase.DEFEAT, "吃满伤害后倒下")
 	check(state.player_hp == 0, "生命归零")
-	check(_log_contains(logs, "得从头再来"), "判负读白出现")
+	check(_log_contains(logs, BattleConfig.TEXT_DEFEAT_TEACHING), "判负读白出现（教程层＝教学文案）")
 	check(not state.end_turn(), "判负后结束回合被拒")
 	check(not state.commit_staged(), "判负后不能结算")
 	check(not state.stage_card(0), "判负后不能摆牌")
@@ -618,7 +653,7 @@ func test_staging_zone() -> void:
 	var state2 := BattleState.new()
 	state2.start(["strike", "strike", "strike", "strike", "strike"])
 	state2.player_cost = 3
-	check(state2.stage_card(0) and state2.stage_card(0) and state2.stage_card(0), "三张打击摆进（合计 Cost 3）")
+	check(state2.stage_card(0) and state2.stage_card(0) and state2.stage_card(0), "三张普通魔弹摆进（合计 Cost 3）")
 	check(state2.staged_cost() == 3, "合计 Cost 3")
 	check(not state2.can_stage(state2.hand[0]), "合计到上限后第 4 张摆不进")
 	check(not state2.stage_card(0), "摆放被拒")
@@ -632,10 +667,10 @@ func test_commit_batch() -> void:
 	check(not state.commit_staged(), "空出牌区打不出")
 	state.stage_card(_find_card(state.hand, "strike"))
 	state.stage_card(_find_card(state.hand, "strike"))
-	check(state.commit_staged(), "两张打击一起打出")
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 4, "两张打击各 2 伤（整批一次结算）")
-	check(_count_log(logs, "你打出「打击」。") == 2, "日志逐张记录")
-	# 新回合补牌会把弃牌堆洗回抽牌堆，所以在整局范围内核对五张打击的去向
+	check(state.commit_staged(), "两张普通魔弹一起打出")
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 4, "两张普通魔弹各 2 伤（整批一次结算）")
+	check(_count_log(logs, "你打出「普通魔弹」。") == 2, "日志逐张记录")
+	# 新回合补牌会把弃牌堆洗回抽牌堆，所以在整局范围内核对四张普通魔弹的去向
 	var strike_stock := 0
 	for card in state.hand:
 		if card.id == "strike":
@@ -646,7 +681,7 @@ func test_commit_batch() -> void:
 	for card in state.discard_pile:
 		if card.id == "strike":
 			strike_stock += 1
-	check(strike_stock == 5, "五张打击都在牌堆里循环")
+	check(strike_stock == 4, "四张普通魔弹都在牌堆里循环")
 	check(state.collection.is_empty(), "非永久牌不进收藏")
 	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 1, "打出后自动进入对方回合")
 	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "对方出了 1 张占位牌，打了 1 点")
@@ -664,7 +699,7 @@ func test_end_turn_settles_staged() -> void:
 	state.stage_card(_find_card(state.hand, "strike"))
 	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 0, "还没过回合")
 	state.end_turn()
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 2, "结束时先结算摆好的打击")
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 2, "结束时先结算摆好的普通魔弹")
 	check(state.staged.is_empty(), "出牌区清空")
 	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 1, "对方回合来过一次")
 	check(state.phase == BattleState.Phase.PLAYER, "进入新回合")
@@ -713,14 +748,14 @@ func test_discard_for_cost() -> void:
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "1 费牌不涨 Cost（12/12）")
 	state.gain_card(CardDB.get_card("wrath"))
 	var wrath_index := _find_card(state.hand, "wrath")
-	check(wrath_index >= 0, "暴怒在手")
-	check(state.discard_for_cost(wrath_index) == 5, "弃 6 费暴怒 +5")
+	check(wrath_index >= 0, "懒惰在手")
+	check(state.discard_for_cost(wrath_index) == 5, "弃 6 费懒惰 +5")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST + 5, "Cost 可超上限（17/12）")
 	check(_log_contains(logs, "Cost +5"), "日志记录了获得点数")
-	check(_find_card(state.discard_pile, "wrath") >= 0, "弃掉的暴怒进弃牌堆")
+	check(_find_card(state.discard_pile, "wrath") >= 0, "弃掉的懒惰进弃牌堆")
 	check(state.discard_for_cost(99) == -1, "越界弃牌被拒")
 	check(state.discard_for_cost(-1) == -1, "负数下标被拒")
-	check(state.stage_card(_find_card(state.hand, "strike")), "摆一张打击")
+	check(state.stage_card(_find_card(state.hand, "strike")), "摆一张普通魔弹")
 	check(state.commit_staged(), "打出结算")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "打出即过回合，新回合重置回 12/12，超出作废")
 	check(state.discard_for_cost(0) >= 0, "新回合仍可主动弃牌换 Cost")
@@ -746,7 +781,7 @@ func test_round_gain_economy() -> void:
 		state.draw_pile.append(CardDB.get_card("guard"))
 	for _i in 3:
 		state.stage_card(_find_card(state.hand, "strike"))
-	check(state.staged.size() == 3, "玩家第一轮打出 3 张打击")
+	check(state.staged.size() == 3, "玩家第一轮打出 3 张普通魔弹")
 	state.commit_staged()
 	check(state.hand.size() == 5, "玩家：剩 2 张＋摸 3 张＝第二轮 5 张")
 	check(state.enemy_hand.size() == 6, "敌人：出 2 张剩 3 张＋摸 3 张＝第二轮 6 张")
@@ -763,7 +798,7 @@ func test_round_gain_economy() -> void:
 	state2.hand.append(CardDB.get_card("call"))
 	for _i in 3:
 		state2.draw_pile.append(CardDB.get_card("strike"))
-	check(state2.stage_card(_find_card(state2.hand, "strike")), "玩家第一轮打出 1 张打击")
+	check(state2.stage_card(_find_card(state2.hand, "strike")), "玩家第一轮打出 1 张普通魔弹")
 	state2.commit_staged()
 	check(state2.hand.size() == 7, "玩家：剩 4 张＋摸 3 张＝第二轮 7 张")
 
@@ -822,10 +857,10 @@ func test_full_victory_flow() -> void:
 	check(state.phase == BattleState.Phase.STRIP, "打倒后进入净化时刻")
 	check(state.enemy_hp == 0, "她归零了")
 	check(state.collection.is_empty(), "净化前收藏为空")
-	check(state.absorb_sin(), "拿起暴怒")
-	check(state.collection.size() == 1 and state.collection[0].id == "wrath", "暴怒进收藏")
-	check(_find_card(state.discard_pile, "wrath") == -1, "暴怒不在弃牌堆")
-	check(_find_card(state.draw_pile, "wrath") == -1, "暴怒不在抽牌堆")
+	check(state.absorb_sin(), "拿起懒惰")
+	check(state.collection.size() == 1 and state.collection[0].id == "wrath", "懒惰进收藏")
+	check(_find_card(state.discard_pile, "wrath") == -1, "懒惰不在弃牌堆")
+	check(_find_card(state.draw_pile, "wrath") == -1, "懒惰不在抽牌堆")
 	check(state.phase == BattleState.Phase.DEBRIEF, "进入三问")
 	check(state.finish_debrief(), "结束三问")
 	check(state.phase == BattleState.Phase.ENDED, "流程结束")
@@ -851,25 +886,26 @@ func test_custom_deck_battle() -> void:
 func test_card_pool() -> void:
 	print("[仓库与卡组模型]")
 	var pool := CardPool.new()
-	check(pool.owned_count("strike") == int(BattleConfig.WAREHOUSE_INITIAL["strike"]), "仓库初始打击数量")
+	check(pool.owned_count("strike") == int(BattleConfig.WAREHOUSE_INITIAL["strike"]), "仓库初始普通魔弹数量")
 	check(pool.owned_count("wrath") == 0, "仓库初始没有罪卡")
 	check(not pool.is_deck_valid(), "空卡组不合法")
-	for _i in 5:
+	for _i in 4:
 		pool.add_to_deck("strike")
+	pool.add_to_deck("heavy_strike")
 	for _i in 3:
 		pool.add_to_deck("guard")
 	check(pool.deck.size() == BattleConfig.DECK_SIZE, "卡组满 8 张")
 	check(not pool.add_to_deck("guard"), "卡组已满不能再加")
-	check(pool.is_deck_valid(), "5 打击＋3 护住的卡组合法")
+	check(pool.is_deck_valid(), "4 普通魔弹＋1 强力魔弹＋3 普通防御的卡组合法")
 	check(pool.remove_from_deck("strike"), "可以移出一张")
 	check(pool.deck.size() == BattleConfig.DECK_SIZE - 1, "移出后剩 7 张")
 	var pool2 := CardPool.new()
 	var pool_total := 0
 	for card_id in BattleConfig.WAREHOUSE_INITIAL:
 		pool_total += int(BattleConfig.WAREHOUSE_INITIAL[card_id])
-	check(pool_total == 20, "仓库初始卡池共 20 张（攻击 7＋防御 5＋功能 8［含增幅 4］）")
-	check(pool2.owned_count("strike") == 5 and pool2.owned_count("guard") == 3 and pool2.owned_count("call") == 2, "仓库打击 5、护住 3、呼喊 2")
-	check(pool2.owned_count("quench") == 2 and pool2.owned_count("surge") == 1 and pool2.owned_count("bulwark") == 1, "仓库增幅牌：淬火 2、蓄能 1、筑壁 1")
+	check(pool_total == 20, "仓库初始卡池共 20 张（攻击 6＋防御 5＋功能 5＋核心 1＋增幅 3）")
+	check(pool2.owned_count("strike") == 4 and pool2.owned_count("guard") == 3 and pool2.owned_count("call") == 2, "仓库普通魔弹 4、普通防御 3、震慑 2")
+	check(pool2.owned_count("quench") == 1 and pool2.owned_count("surge") == 1 and pool2.owned_count("bulwark") == 1, "仓库增幅牌：灼印 1、蓄流 1、坚壁 1")
 	check(pool2.can_add("quench"), "增幅牌可以加进卡组")
 	for _i in 3:
 		pool2.add_to_deck("guard")
@@ -883,12 +919,12 @@ func test_card_pool() -> void:
 	for _i in 8:
 		pool3.deck.append("guard")
 	check(not pool3.is_deck_valid(), "满 8 张但全无伤害牌不合法")
-	check(not pool2.add_to_deck("guard"), "超过仓库数量不能加（护住只有 3 张）")
+	check(not pool2.add_to_deck("guard"), "超过仓库数量不能加（普通防御只有 3 张）")
 
 
 func test_amplify_cards() -> void:
 	print("[增幅牌：弃掉触发的本回合加成]")
-	# 淬火：弃掉后本回合伤害 +2；下回合回归
+	# 灼印：弃掉后本回合伤害 +2；下回合回归
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 0
@@ -896,29 +932,29 @@ func test_amplify_cards() -> void:
 	state.hand.append(CardDB.get_card("quench"))
 	state.hand.append(CardDB.get_card("strike"))
 	state.hand.append(CardDB.get_card("strike"))
-	check(state.discard_for_cost(0) == 0, "弃淬火（1 费）+0 Cost")
+	check(state.discard_for_cost(0) == 0, "弃灼印（1 费）+0 Cost")
 	check(state.turn_attack_bonus == 2, "本回合伤害加成 +2")
 	check(_log_contains(logs, "本回合你的伤害 +2"), "弃牌触发日志出现")
-	check(state.stage_card(0), "摆一张打击")
+	check(state.stage_card(0), "摆一张普通魔弹")
 	state.commit_staged()
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 4, "打击吃到加成（2+2=4 伤）")
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 4, "普通魔弹吃到加成（2+2=4 伤）")
 	check(state.turn_attack_bonus == 0, "新回合加成归零")
-	check(state.stage_card(0), "下回合再摆一张打击")
+	check(state.stage_card(0), "下回合再摆一张普通魔弹")
 	state.commit_staged()
 	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 6, "下回合回归 2 伤（累计 6）")
-	# 蓄能：弃掉 → 获得 3 点 Cost（可超上限）
+	# 蓄流：弃掉 → 获得 3 点 Cost（可超上限）
 	var state2 := _make_state()
 	state2.debug_force_plays = 0
 	state2.hand.clear()
 	state2.hand.append(CardDB.get_card("surge"))
-	check(state2.discard_for_cost(0) == 0, "弃蓄能 +0 Cost")
+	check(state2.discard_for_cost(0) == 0, "弃蓄流 +0 Cost")
 	check(state2.player_cost == BattleConfig.PLAYER_MAX_COST + 3, "获得 Cost +3（15/12）")
-	# 筑壁：弃掉 → 获得 3 点格挡，挡下本回合敌人 2 点
+	# 坚壁：弃掉 → 获得 3 点格挡，挡下本回合敌人 2 点
 	var state3 := _make_state()
 	state3.debug_force_plays = 2
 	state3.hand.clear()
 	state3.hand.append(CardDB.get_card("bulwark"))
-	check(state3.discard_for_cost(0) == 0, "弃筑壁 +0 Cost")
+	check(state3.discard_for_cost(0) == 0, "弃坚壁 +0 Cost")
 	check(state3.player_block == 3, "格挡 +3")
 	state3.end_turn()
 	check(state3.player_hp == BattleConfig.PLAYER_MAX_HP, "挡下敌人 2 点")
@@ -936,7 +972,7 @@ func test_amplify_cards() -> void:
 		state5.hand.append(CardDB.get_card("strike"))
 	state5.hand.append(CardDB.get_card("quench"))
 	var quench_index := _find_card(state5.hand, "quench")
-	check(quench_index >= 0, "超限手牌里有淬火")
+	check(quench_index >= 0, "超限手牌里有灼印")
 	check(state5.discard_from_hand(quench_index), "强制弃牌成功")
 	check(state5.turn_attack_bonus == 0, "强制弃牌不触发加成")
 
@@ -950,18 +986,18 @@ func test_card_stacking() -> void:
 	state.hand.append(CardDB.get_card("strike"))
 	state.hand.append(CardDB.get_card("strike"))
 	state.hand.append(CardDB.get_card("guard"))
-	check(state.stage_card(0), "摆第一张打击")
-	check(state.can_merge_with(state.hand[0], 0), "手牌打击可叠到出牌区打击上")
+	check(state.stage_card(0), "摆第一张普通魔弹")
+	check(state.can_merge_with(state.hand[0], 0), "手牌普通魔弹可叠到出牌区普通魔弹上")
 	check(state.merge_into_staged(0, 0), "拖叠成功")
 	check(state.staged.size() == 1, "合成牌占同一卡槽（仍 1 张）")
 	var merged: CardData = state.staged[0]
 	check(merged.is_merged(), "标记为合成牌")
 	check(merged.cost == 3, "费用 = 1+1+叠牌费 1 = 3")
-	check(merged.display_name == "打击＋打击", "牌名以＋连接")
+	check(merged.display_name == "普通魔弹＋普通魔弹", "牌名以＋连接")
 	check(merged.parts.size() == 2, "记录两张原牌")
 	check(merged.text == "造成 4 点伤害。", "牌面文本合成为 4 伤")
 	check(state.staged_cost() == 3, "出牌区合计费用 3")
-	check(not state.can_merge_with(CardDB.get_card("guard"), 0), "异类不能叠（护住叠不进打击）")
+	check(not state.can_merge_with(CardDB.get_card("guard"), 0), "异类不能叠（普通防御叠不进普通魔弹）")
 	check(not state.can_merge_with(CardDB.get_card("quench"), 0), "增幅牌不能叠")
 	state.hand.append(CardDB.get_card("wrath"))
 	state.sin_available = true
@@ -971,7 +1007,7 @@ func test_card_stacking() -> void:
 	check(state.attack_plays_this_battle == 2, "攻击任务按原牌张数计（2 张）")
 	check(state.discard_pile.size() == 2, "弃牌堆拆回两张原牌")
 	check(state.discard_pile[0].id == "strike" and state.discard_pile[1].id == "strike", "弃牌堆里是原牌不是合成体")
-	check(_log_contains(logs, "合成「打击＋打击」"), "合成日志出现")
+	check(_log_contains(logs, "合成「普通魔弹＋普通魔弹」"), "合成日志出现")
 	# 三张合成：费用 1+1+1+2×1=5；2+2+4=8 伤；累计 3 张攻击触发罪卡任务解锁
 	var state2 := _make_sin_state()
 	state2.debug_force_plays = 0
@@ -981,10 +1017,10 @@ func test_card_stacking() -> void:
 	state2.hand.append(CardDB.get_card("heavy_strike"))
 	state2.stage_card(0)
 	state2.merge_into_staged(0, 0)
-	check(state2.can_merge_with(state2.hand[0], 0), "重击可叠进打击＋打击（同大类）")
+	check(state2.can_merge_with(state2.hand[0], 0), "强力魔弹可叠进普通魔弹＋普通魔弹（同大类）")
 	check(state2.merge_into_staged(0, 0), "三张合成")
 	check(state2.staged[0].cost == 5, "三张合成费用 = 3 张原费 + 2 次叠牌费 = 5")
-	check(state2.staged[0].display_name == "打击＋打击＋重击", "三张牌名")
+	check(state2.staged[0].display_name == "普通魔弹＋普通魔弹＋强力魔弹", "三张牌名")
 	state2.commit_staged()
 	check(state2.enemy_hp == BattleConfig.ENEMY_MAX_HP - 8, "2+2+4=8 伤一次打出")
 	check(state2.attack_plays_this_battle == 3, "三张攻击牌计 3")
@@ -1003,7 +1039,7 @@ func test_card_stacking() -> void:
 	for card in state3.hand:
 		if card.id == "strike":
 			strike_count += 1
-	check(strike_count == 2 and state3.hand.size() == 3, "拆成两张打击＋护住回手")
+	check(strike_count == 2 and state3.hand.size() == 3, "拆成两张普通魔弹＋普通防御回手")
 	# 5 槽满仍可叠（不新增卡槽，绕过槽上限）
 	var state4 := BattleState.new()
 	var deck: Array = []
@@ -1166,6 +1202,9 @@ func test_layer_data() -> void:
 	check(_route_signature(LayerConfig.generate_route(2, rng_a)) == _route_signature(LayerConfig.generate_route(2, rng_b)), "同种子同路线")
 	check(LayerConfig.transition_lines(2).size() == 3, "第 2 层有上行过渡读白")
 	check(LayerConfig.transition_lines(1).is_empty(), "第 1 层过渡走教程结尾读白")
+	check(LayerConfig.LAYER1_COMPANION == "菲戈蕾", "第 1 层同行者＝菲戈蕾（净化后人身；双名制）")
+	var transition2 := "\n".join(PackedStringArray(LayerConfig.transition_lines(2)))
+	check(transition2.contains("菲戈蕾"), "第 2 层过渡读白含菲戈蕾")
 	# RunState：进层懒生成一次、层内稳定；四态；死亡重掷（重生成）＋夹具行进
 	var run := RunState.new()
 	check(run.current_layer == 2, "教程完成后的目标是第 2 层")
@@ -1285,6 +1324,128 @@ func test_story_battle_boss() -> void:
 	check(not state2.sin_available, "开局封锁")
 
 
+func test_multi_enemy_helpers() -> void:
+	print("[多敌人：property 退化读写、active 前进、AOE 跳过已倒下、沉睡追伤、治疗封顶]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_teaching()
+	check(state.enemy_name == "蜗牛怪物" and state.enemy_hp == 5 and state.enemy_max_hp == 5, "单敌：property 读首个存活项")
+	_teaching_reach_wave2(state)
+	check(state.enemies.size() == 3 and state.enemies[0].has("sleeping"), "波 2 三敌（含 sleeping 字段）")
+	state.enemies[0]["name"] = "甲"
+	state.enemies[1]["name"] = "乙"
+	state.enemies[2]["name"] = "丙"
+	state.enemy_hp = 2
+	check(int(state.enemies[0]["hp"]) == 2 and state.enemy_hp == 2, "property set 写回首个存活项")
+	state.enemies[0]["hp"] = 0
+	check(state.enemy_name == "乙" and state.enemy_hp == 3, "倒下后 active 前进到下一个存活")
+	# AOE 跳过已倒下（甲 0 血不打，乙丙各吃 3 伤）；全灭后 property 回退读第一项
+	logs.clear()
+	state._apply_effect({"op": "deal_damage", "amount": 3, "target": "all"}, "测试")
+	check(_count_log(logs, "甲受到") == 0 and _count_log(logs, "乙受到 3 点伤害。") == 1 and _count_log(logs, "丙受到 3 点伤害。") == 1, "AOE 只打存活的两只")
+	check(state.enemy_name == "甲", "全灭后 property 回退第一项")
+	# 沉睡追伤：乙丙沉睡 3＋2；甲未沉睡原伤
+	state.enemies[0]["hp"] = 3
+	state.enemies[0]["sleeping"] = false
+	state.enemies[1]["hp"] = 3
+	state.enemies[2]["hp"] = 3
+	logs.clear()
+	state._apply_effect({"op": "deal_damage", "amount": 3, "target": "all", "bonus_vs": "sleeping", "bonus": 2}, "测试")
+	check(_count_log(logs, "甲受到 3 点伤害。") == 1 and _count_log(logs, "乙受到 5 点伤害。") == 1 and _count_log(logs, "丙受到 5 点伤害。") == 1, "沉睡 3＋2、未沉睡 3")
+	# 治疗封顶
+	state.player_hp = BattleConfig.PLAYER_MAX_HP
+	logs.clear()
+	state._apply_effect({"op": "heal", "amount": 3}, "测试")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP and _log_contains(logs, "没有恢复的必要"), "满血治疗不溢出")
+	state.player_hp = BattleConfig.PLAYER_MAX_HP - 1
+	logs.clear()
+	state._apply_effect({"op": "heal", "amount": 3}, "测试")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP and _log_contains(logs, "你恢复了 1 点生命。（生命 10）"), "按缺口封顶恢复")
+
+
+func test_teaching_battle_logic() -> void:
+	print("[蜗牛教学战：单位制 4＋钉死牌组节拍（波 1 补刀 → 波 2 沉睡 → 净化＋强欲魔弹清场）]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_teaching()
+	check(state.mode == BattleState.Mode.TEACHING, "教学战模式")
+	check(state.max_cost == 4 and state.player_cost == 4, "单位制：魔力总量 4")
+	check(state.player_hp == 8, "开局生命 8（摔伤，演示治疗）")
+	check(state.enemy_name == "蜗牛怪物" and state.enemy_hp == 5, "波 1：蜗牛怪物 5 血")
+	check(state.hand.size() == 5 and state.hand[0].id == "guard" and state.hand[1].id == "strike" and state.hand[2].id == "strike" and state.hand[3].id == "heal" and state.hand[4].id == "strike", "钉死开局手：防御＋魔弹×2＋治疗＋魔弹")
+	check(state.draw_pile.size() == 3 and state.draw_pile[0].id == "strike" and state.draw_pile[1].id == "greed_shot" and state.draw_pile[2].id == "cleanse", "牌堆 3 张：魔弹＋强欲魔弹＋净化")
+	check(state.enemy_hand.size() == 3, "敌方蜗牛牌组 3 张全入手")
+	check(_count_log(logs, String(BattleConfig.TEXT_TEACHING_START[0])) == 1 and _count_log(logs, String(BattleConfig.TEXT_TEACHING_START[1])) == 1 and _count_log(logs, String(BattleConfig.TEXT_TEACHING_START[2])) == 1, "开局三条莉维娅引导语")
+	# 回合 1：防住 2 伤蜗牛撞击＋两发魔弹打剩 1 血＋治疗封顶
+	state.stage_card(_find_card(state.hand, "guard"))
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "heal"))
+	check(state.staged_cost() == 4 and state.commit_staged(), "4 单位打满一批打出")
+	check(state.enemy_hp == 1, "两发魔弹 5→1（留一口气）")
+	check(state.player_hp == 10 and _log_contains(logs, "你恢复了 2 点生命。（生命 10）"), "治疗按缺口恢复 8→10（封顶 10）")
+	check(_log_contains(logs, "它整个被挡住了。"), "2 点格挡正好挡下蜗牛撞击（2 伤）")
+	check(state.turn_count == 2 and state.player_cost == 4, "进入第 2 回合，魔力刷新为 4")
+	check(_count_log(logs, BattleConfig.TEXT_TEACHING_TURN_KILL) == 1, "莉维娅提示补刀")
+	# 回合 2：补刀 → 波 2 三只群怪沉睡登场
+	state.stage_card(_find_card(state.hand, "strike"))
+	check(state.commit_staged(), "补刀打出")
+	check(state.enemies.size() == 3 and state.teaching_wave_index == 1, "波 2：三只蜗牛群怪")
+	var all_sleeping := true
+	for enemy in state.enemies:
+		all_sleeping = all_sleeping and int(enemy["hp"]) == 3 and bool(enemy["sleeping"])
+	check(all_sleeping, "群怪 3 血全沉睡（懒惰之力压制）")
+	check(state.pending_sleep and state.sleep_deadline_turn == 4, "睡意倒计时＝回合 2＋2")
+	check(_count_log(logs, BattleConfig.TEXT_TEACHING_FIRST_FELL) == 1 and _count_log(logs, BattleConfig.TEXT_TEACHING_SLEEP_EVENT) == 1 and _count_log(logs, BattleConfig.TEXT_TEACHING_SLEEP_HINT) == 1, "波 2 登场三条读白")
+	check(_count_log(logs, BattleConfig.TEXT_ENEMY_SLEEPING % "蜗牛群怪") == 1, "敌人回合：沉睡不出手")
+	check(state.turn_count == 3 and _count_log(logs, BattleConfig.TEXT_TEACHING_TURN_WAVE2) == 1, "第 3 回合提示净化＋强欲魔弹")
+	# 回合 3：净化免疫＋强欲魔弹群体追伤清场
+	var cleanse_index := _find_card(state.hand, "cleanse")
+	var greed_index := _find_card(state.hand, "greed_shot")
+	check(cleanse_index >= 0 and greed_index >= 0, "净化与强欲魔弹在手")
+	state.stage_card(cleanse_index)
+	if greed_index > cleanse_index:
+		greed_index -= 1
+	state.stage_card(greed_index)
+	check(state.staged_cost() == 4, "净化 1＋强欲魔弹 3＝4 单位")
+	check(state.commit_staged(), "清场")
+	check(state.sleep_immune and not state.pending_sleep, "净化：免疫并清掉待发睡意")
+	check(_count_log(logs, BattleConfig.TEXT_CLEANSE_SLEEP) == 1, "净化挡下睡意读白")
+	check(_count_log(logs, "蜗牛群怪受到 5 点伤害。") == 3, "强欲魔弹 3＋沉睡追伤 2＝5 × 3")
+	check(state.phase == BattleState.Phase.ENDED and _count_log(logs, BattleConfig.TEXT_TEACHING_WIN) == 1, "全灭＝教学战结束")
+	check(not state.absorb_sin() and state.collection.is_empty(), "教学战不进净化段、无收藏")
+
+
+func test_teaching_sleep_timeout() -> void:
+	print("[蜗牛教学战·睡意超时：不净化＝第 4 回合被跳过（一次）；净化＝不受影响]")
+	# 分支 A：不净化，空过一回合 → 倒计时到点，第 4 回合魔力归零；第 5 回合恢复
+	var logs_a: Array = []
+	var state_a := BattleState.new()
+	state_a.log_event.connect(func(text: String) -> void: logs_a.append(text))
+	state_a.start_teaching()
+	_teaching_reach_wave2(state_a)
+	check(state_a.turn_count == 3 and state_a.player_cost == 4, "到第 3 回合（倒计时剩 1）")
+	check(state_a.end_turn(), "空过第 3 回合")
+	check(state_a.turn_count == 4 and state_a.player_cost == 0, "第 4 回合：睡意到点，魔力归零")
+	check(_count_log(logs_a, BattleConfig.TEXT_SLEEP_SKIP) == 1, "睡意跳过读白出现一次")
+	check(not state_a.pending_sleep, "跳过即消耗睡意")
+	state_a.end_turn()
+	check(state_a.turn_count == 5 and state_a.player_cost == 4, "第 5 回合魔力恢复（走完即解）")
+	check(_count_log(logs_a, BattleConfig.TEXT_SLEEP_SKIP) == 1, "此后不再触发")
+	# 分支 B：第 3 回合净化 → 第 4 回合不进跳过
+	var logs_b: Array = []
+	var state_b := BattleState.new()
+	state_b.log_event.connect(func(text: String) -> void: logs_b.append(text))
+	state_b.start_teaching()
+	_teaching_reach_wave2(state_b)
+	state_b.stage_card(_find_card(state_b.hand, "cleanse"))
+	check(state_b.commit_staged(), "第 3 回合净化")
+	check(state_b.turn_count == 4 and state_b.player_cost == 4, "第 4 回合：已免疫，魔力正常")
+	check(_count_log(logs_b, BattleConfig.TEXT_SLEEP_SKIP) == 0, "无睡意跳过读白")
+
+
 func test_battle_scene_tutorial() -> void:
 	print("[战斗场景·教程模式：拖拽摆放 → 收回 → 打出 → 完整一局]")
 	var packed := load("res://scenes/battle.tscn") as PackedScene
@@ -1292,6 +1453,8 @@ func test_battle_scene_tutorial() -> void:
 	if packed == null:
 		return
 	var scene: Variant = packed.instantiate()
+	# 注入确定性卡组：新默认卡组只有 4 张普通魔弹，若开局没摸到会找不到「第一张魔弹」按钮
+	scene.configure(BattleState.Mode.TUTORIAL, ["strike", "strike", "strike", "strike", "strike", "guard", "guard", "guard"])
 	var viewport := _attach_scene(scene)
 	await process_frame
 	var hand_box := scene.get_node("%HandBox") as Control
@@ -1312,19 +1475,19 @@ func test_battle_scene_tutorial() -> void:
 	check(timer_label.text == "剩余 45 秒", "开局计时 45 秒")
 	var cost_label := scene.get_node("%CostLabel") as Label
 	_check_cost_label(scene, "Cost 12 / 12", "开局 Cost 显示 12/12")
-	var first_strike := _first_live_button(hand_box, "打击")
-	check(first_strike != null, "手里有打击")
+	var first_strike := _first_live_button(hand_box, "普通魔弹")
+	check(first_strike != null, "手里有普通魔弹")
 	check(first_strike.drag_zone == "hand", "手牌处于可拖状态")
 	check(_drag_card_to(scene, first_strike, play_box), "拖手牌到出牌区")
 	check(scene.state.staged.size() == 1, "拖拽摆进出牌区")
 	_check_cost_label(scene, "Cost 11 / 12", "摆放后可用 Cost 实时下调（11/12，摆放不扣实扣）")
 	check(commit_button.text == "打出（Cost -1）", "打出按钮预告合计 Cost")
-	var staged_button := _first_live_button(play_box, "打击")
+	var staged_button := _first_live_button(play_box, "普通魔弹")
 	check(staged_button != null, "出牌区出现已摆的牌")
 	staged_button.pressed.emit()
 	check(scene.state.staged.is_empty(), "点击已摆的牌收回")
 	_check_cost_label(scene, "Cost 12 / 12", "收回后可用 Cost 实时恢复（12/12）")
-	var strike_again := _first_live_button(hand_box, "打击")
+	var strike_again := _first_live_button(hand_box, "普通魔弹")
 	check(_drag_card_to(scene, strike_again, play_box), "重新拖进")
 	check(scene.state.staged.size() == 1, "重新摆进出牌区")
 	scene.state.player_cost = 0
@@ -1340,7 +1503,7 @@ func test_battle_scene_tutorial() -> void:
 	check(not commit_button.disabled, "Cost 恢复后可以打出")
 	scene.state.debug_force_plays = 1
 	commit_button.pressed.emit()
-	check(scene.state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 2, "打击照常生效")
+	check(scene.state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 2, "普通魔弹照常生效")
 	check(scene.state.staged.is_empty(), "打出后出牌区清空")
 	_check_cost_label(scene, "Cost 12 / 12", "打出即结束回合，新回合 Cost 重置满")
 	check(timer_label.text == "剩余 45 秒", "新回合计时重置")
@@ -1348,7 +1511,7 @@ func test_battle_scene_tutorial() -> void:
 	check(enemy_hand_label.text == "手牌 7 张", "敌人出 1 张再摸 3 张，手牌显示 7 张")
 	check(commit_button.disabled and commit_button.text == "打出", "新回合打出按钮回到初始态")
 	check(not end_turn_button.disabled, "新回合结束回合按钮可用")
-	var strike_next := _first_live_button(hand_box, "打击")
+	var strike_next := _first_live_button(hand_box, "普通魔弹")
 	check(strike_next != null and strike_next.modulate.r >= 1.0, "新回合手牌恢复可用")
 	var ended_calls: Array = []
 	scene.battle_ended.connect(func(practice: bool) -> void: ended_calls.append(practice))
@@ -1362,7 +1525,7 @@ func test_battle_scene_tutorial() -> void:
 		if card_button != null and not card_button.is_queued_for_deletion() and not card_button.disabled:
 			strip_hand_locked = false
 	check(strip_hand_locked, "净化时刻手牌全部禁用（不可拖拽）")
-	check(story.text.contains("滚烫的白火"), "净化时刻读白在屏上")
+	check(story.text.contains("白雾"), "净化时刻读白在屏上")
 	var absorb_button := scene.get_node("%AbsorbButton") as Button
 	check(absorb_button.visible, "拿起按钮出现")
 	absorb_button.pressed.emit()
@@ -1422,6 +1585,86 @@ func test_battle_scene_practice() -> void:
 	(scene2.get_node("%QuitPracticeButton") as Button).pressed.emit()
 	check(ended2 == [true], "中途「结束练习」也能直接回去")
 	viewport2.queue_free()
+	await process_frame
+
+
+func test_teaching_battle_scene() -> void:
+	print("[教学战场景：拖拽摆放打满 4 单位 → 波 2 群怪列表 → 清场即结束（无覆盖层）]")
+	var scene: Variant = (load("res://scenes/battle.tscn") as PackedScene).instantiate()
+	scene.configure(BattleState.Mode.TEACHING, [])
+	var viewport := _attach_scene(scene)
+	await process_frame
+	var hand_box := scene.get_node("%HandBox") as Control
+	var play_box := scene.get_node("%PlayBox") as HBoxContainer
+	var commit_button := scene.get_node("%CommitButton") as Button
+	var ended_calls: Array = []
+	scene.battle_ended.connect(func(practice: bool) -> void: ended_calls.append(practice))
+	check((scene.get_node("%TurnTimerLabel") as Label).text == "剩余 90 秒", "教学战时限 90 秒")
+	_check_cost_label(scene, "Cost 4 / 4", "单位制 4")
+	var enemy_list := scene.get_node("EnemyListLabel") as Label
+	check(not enemy_list.visible, "单敌时敌人列表隐藏")
+	check(not (scene.get_node("%QuitPracticeButton") as Button).visible, "教学战无结束练习按钮")
+	check(not (scene.get_node("%Overlay") as Control).visible, "开局无覆盖层")
+	# 回合 1：拖 防御＋魔弹×2＋治疗 → Cost 打空 → 打出
+	check(_drag_card_to(scene, _first_live_button(hand_box, "普通防御"), play_box), "拖防御进区")
+	check(_drag_card_to(scene, _first_live_button(hand_box, "普通魔弹"), play_box), "拖第一张魔弹")
+	check(_drag_card_to(scene, _first_live_button(hand_box, "普通魔弹"), play_box), "拖第二张魔弹")
+	check(_drag_card_to(scene, _first_live_button(hand_box, "治疗术"), play_box), "拖治疗术")
+	check(scene.state.staged_cost() == 4, "4 单位打满")
+	_check_cost_label(scene, "Cost 0 / 4", "可用 Cost 归零")
+	commit_button.pressed.emit()
+	check(scene.state.enemy_hp == 1, "蜗牛 5→1")
+	check((scene.get_node("%PlayerHpLabel") as Label).text == "你：10 / 10", "治疗封顶后血线 10")
+	# 回合 2：补刀 → 波 2 沉睡登场，右上角逐行显示三只
+	check(_drag_card_to(scene, _first_live_button(hand_box, "普通魔弹"), play_box), "拖补刀魔弹")
+	commit_button.pressed.emit()
+	check(scene.state.teaching_wave_index == 1, "推进到波 2")
+	check(enemy_list.visible and enemy_list.text.count("3 / 3") == 3, "敌人列表逐行显示三只 3/3（实际：" + enemy_list.text.replace("\n", "｜") + "）")
+	# 回合 3：净化＋强欲魔弹 → 清场结束
+	check(_drag_card_to(scene, _first_live_button(hand_box, "净化"), play_box), "拖净化")
+	check(_drag_card_to(scene, _first_live_button(hand_box, "强欲魔弹"), play_box), "拖强欲魔弹")
+	commit_button.pressed.emit()
+	check(scene.state.phase == BattleState.Phase.ENDED, "清场即结束")
+	check(ended_calls == [false], "结束上报：非练习")
+	check(not (scene.get_node("%Overlay") as Control).visible, "教学战结束不进覆盖层")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_prologue_page() -> void:
+	print("[初幕演出页：9 拍推进、名牌/立绘切换、末拍「迎战」、结束信号]")
+	var page := ProloguePage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	var finished_count := [0]
+	page.finished.connect(func() -> void: finished_count[0] += 1)
+	page.start()
+	var text_label := page._text_label as Label
+	var speaker_label := page._speaker_label as Label
+	var portrait := page._portrait as TextureRect
+	var button := page._continue_button as Button
+	check(page.visible, "演出页可见")
+	check(text_label.text.contains("音海市") and text_label.text.contains("贝嘉"), "第 1 拍：现世·夜（出租屋）")
+	check(not speaker_label.visible, "第 1 拍旁白无名牌")
+	for _i in 2:
+		button.pressed.emit()
+	check(speaker_label.visible and speaker_label.text == "菲戈蕾", "第 3 拍：菲戈蕾说话")
+	check(text_label.text.contains("丁香紫"), "菲戈蕾立绘拍文案（丁香紫的眼睛）")
+	check(portrait.visible == FileAccess.file_exists(PrologueData.BG_DIR + "figelie.png"), "立绘显示随素材在场")
+	for _i in 2:
+		button.pressed.emit()
+	check(speaker_label.text == "莉维娅", "第 5 拍：莉维娅（意识分身）")
+	for _i in 2:
+		button.pressed.emit()
+	check(text_label.text.contains("八层重叠的魔法结界"), "第 7 拍：八层结界与七位魔法少女设定")
+	button.pressed.emit()
+	check(text_label.text.contains("四种颜色的卡牌"), "第 8 拍：力量化作四色卡牌")
+	button.pressed.emit()
+	check(text_label.text.contains("彻底污染") and button.text == "迎战", "末拍：菲戈蕾被彻底污染，按钮＝迎战")
+	check(finished_count[0] == 0, "末拍仍在演出中")
+	button.pressed.emit()
+	check(finished_count[0] == 1, "第 9 次推进发出结束信号")
+	viewport.queue_free()
 	await process_frame
 
 
@@ -1641,14 +1884,14 @@ func test_scene_turn_timer() -> void:
 	await process_frame
 	var timer_label := scene.get_node("%TurnTimerLabel") as Label
 	check(timer_label.text == "剩余 45 秒", "开局 45 秒")
-	var strike_button := _first_live_button(scene.get_node("%HandBox") as Control, "打击")
-	check(_drag_card_to(scene, strike_button, scene.get_node("%PlayBox") as HBoxContainer), "拖一张打击进出牌区")
-	check(scene.state.staged.size() == 1, "摆了一张打击")
+	var strike_button := _first_live_button(scene.get_node("%HandBox") as Control, "普通魔弹")
+	check(_drag_card_to(scene, strike_button, scene.get_node("%PlayBox") as HBoxContainer), "拖一张普通魔弹进出牌区")
+	check(scene.state.staged.size() == 1, "摆了一张普通魔弹")
 	scene.turn_time_left = 0.0
 	await process_frame
 	await process_frame
 	check(scene.state.staged.is_empty(), "到点自动结算出牌区")
-	check(scene.state.enemy_hp == BattleConfig.PRACTICE_ENEMY_HP - 2, "摆放的打击已结算")
+	check(scene.state.enemy_hp == BattleConfig.PRACTICE_ENEMY_HP - 2, "摆放的普通魔弹已结算")
 	check(scene.state.player_cost == BattleConfig.PLAYER_MAX_COST, "进入新回合，Cost 重置")
 	check(timer_label.text == "剩余 45 秒", "计时重置")
 	check(not timer_label.has_theme_color_override("font_color"), "平时计时器不标红")
@@ -1672,6 +1915,8 @@ func test_scene_drag_and_discard() -> void:
 	if packed == null:
 		return
 	var scene: Variant = packed.instantiate()
+	# 注入确定性卡组：新默认卡组只有 4 张普通魔弹，若开局没摸到会找不到按钮
+	scene.configure(BattleState.Mode.TUTORIAL, ["strike", "strike", "strike", "strike", "strike", "guard", "guard", "guard"])
 	var viewport := _attach_scene(scene)
 	await process_frame
 	var hand_box := scene.get_node("%HandBox") as Control
@@ -1681,7 +1926,7 @@ func test_scene_drag_and_discard() -> void:
 	var cost_label := scene.get_node("%CostLabel") as Label
 	check(play_box.size.x > scene.size.x * 0.6, "出牌区有实际宽度（可承接拖放）")
 	check((scene.get_node("HandScroll") as ScrollContainer).size.x > scene.size.x * 0.6, "手牌区横跨屏幕底部")
-	var strike_button := _first_live_button(hand_box, "打击")
+	var strike_button := _first_live_button(hand_box, "普通魔弹")
 	check(strike_button != null and strike_button.drag_zone == "hand", "手牌处于可拖状态")
 	if strike_button == null:
 		viewport.queue_free()
@@ -1695,7 +1940,7 @@ func test_scene_drag_and_discard() -> void:
 	scene._drop_data(outside_point, drag_data)
 	check(scene.state.staged.size() == 1, "在日志区放手，牌自动摆进出牌区")
 	check(_count_live_card_buttons(hand_box) == 4, "手牌少了一张")
-	var play_strike := _first_live_button(play_box, "打击")
+	var play_strike := _first_live_button(play_box, "普通魔弹")
 	check(play_strike != null and play_strike.drag_zone == "play", "出牌区的牌可拖")
 	check(_drag_card_to(scene, play_strike, hand_box), "拖回手牌区可以收回")
 	check(scene.state.staged.is_empty(), "拖回后出牌区清空")
@@ -1705,8 +1950,8 @@ func test_scene_drag_and_discard() -> void:
 	scene.state.deck_sin_id = "wrath"
 	scene.state.sin_available = true
 	_check_cost_label(scene, "Cost 12 / 12", "弃牌前 Cost 12 / 12")
-	var wrath_button := _first_live_button(hand_box, "暴怒")
-	check(wrath_button != null, "手里出现暴怒")
+	var wrath_button := _first_live_button(hand_box, "懒惰")
+	check(wrath_button != null, "手里出现懒惰")
 	# 悬停反馈：模拟拖拽开始状态（与引擎通知同路径），检查高亮与弃牌收益预告
 	var play_panel := scene.get_node("%PlayZonePanel") as PanelContainer
 	var play_base_border: Color = (play_panel.get_theme_stylebox("panel") as StyleBoxFlat).border_color
@@ -1714,33 +1959,33 @@ func test_scene_drag_and_discard() -> void:
 	scene._drag_zone_source = "hand"
 	var wrath_data: Variant = wrath_button._get_drag_data(Vector2.ZERO)
 	var discard_point: Vector2 = scene.get_global_transform().affine_inverse() * discard_zone.get_global_rect().get_center()
-	check(scene._can_drop_data(discard_point, wrath_data), "暴怒能投放到弃牌区")
+	check(scene._can_drop_data(discard_point, wrath_data), "懒惰能投放到弃牌区")
 	check(scene._drag_target_now == "discard", "悬停目标记录为弃牌区")
-	check(discard_zone_label.text.contains("弃掉「暴怒」") and discard_zone_label.text.contains("Cost +5"), "弃牌区预告弃牌收益（暴怒 → Cost +5）")
+	check(discard_zone_label.text.contains("弃掉「懒惰」") and discard_zone_label.text.contains("Cost +5"), "弃牌区预告弃牌收益（懒惰 → Cost +5）")
 	check((discard_zone.get_theme_stylebox("panel") as StyleBoxFlat).border_color != discard_base_border, "悬停的弃牌区边框亮起")
 	check((play_panel.get_theme_stylebox("panel") as StyleBoxFlat).border_color != play_base_border, "可投放的出牌区边框提示")
 	check(scene._can_drop_data(outside_point, wrath_data), "拖到空白处也接受（自动摆进出牌区）")
 	check(scene._drag_target_now == "play", "离开弃牌区后悬停目标记为出牌区")
-	check(not discard_zone_label.text.contains("弃掉「暴怒」"), "离开弃牌区后预告收起")
+	check(not discard_zone_label.text.contains("弃掉「懒惰」"), "离开弃牌区后预告收起")
 	scene._notification(Control.NOTIFICATION_DRAG_END)
 	check((discard_zone.get_theme_stylebox("panel") as StyleBoxFlat).border_color == discard_base_border and (play_panel.get_theme_stylebox("panel") as StyleBoxFlat).border_color == play_base_border, "拖拽结束高亮复位")
-	check(_drag_card_to(scene, wrath_button, discard_zone), "拖暴怒到弃牌区")
+	check(_drag_card_to(scene, wrath_button, discard_zone), "拖懒惰到弃牌区")
 	_check_cost_label(scene, "Cost 17 / 12", "弃 6 费牌 +5，Cost 超上限（17/12）")
 	check(discard_zone_label.text.contains("+5"), "弃牌区显示本回合已获得 +5")
-	check(_find_card(scene.state.discard_pile, "wrath") >= 0, "弃掉的暴怒进弃牌堆")
-	var strike_to_discard := _first_live_button(hand_box, "打击")
+	check(_find_card(scene.state.discard_pile, "wrath") >= 0, "弃掉的懒惰进弃牌堆")
+	var strike_to_discard := _first_live_button(hand_box, "普通魔弹")
 	check(_drag_card_to(scene, strike_to_discard, discard_zone), "1 费牌也能拖去弃掉")
 	_check_cost_label(scene, "Cost 17 / 12", "1 费牌弃掉 +0，Cost 不变")
-	var play_strike2 := _first_live_button(hand_box, "打击")
-	check(_drag_card_to(scene, play_strike2, play_box), "摆一张打击准备打出")
+	var play_strike2 := _first_live_button(hand_box, "普通魔弹")
+	check(_drag_card_to(scene, play_strike2, play_box), "摆一张普通魔弹准备打出")
 	scene.state.debug_force_plays = 0
 	(scene.get_node("%CommitButton") as Button).pressed.emit()
 	check(scene.state.staged.is_empty(), "打出后出牌区清空")
 	check(scene.state.phase == BattleState.Phase.PLAYER, "打出即结束回合，回到新回合")
 	_check_cost_label(scene, "Cost 12 / 12", "新回合 Cost 重置回 12 / 12")
 	check(discard_zone_label.text.contains("+0"), "弃牌区回合计数归零")
-	var strike_after_commit := _first_live_button(hand_box, "打击")
-	check(strike_after_commit != null, "新回合手里仍有打击")
+	var strike_after_commit := _first_live_button(hand_box, "普通魔弹")
+	check(strike_after_commit != null, "新回合手里仍有普通魔弹")
 	if strike_after_commit != null:
 		_drag_card_to(scene, strike_after_commit, play_box)
 	check(scene.state.staged.size() == 1, "新回合可以继续摆放")
@@ -1762,24 +2007,24 @@ func test_scene_stacking() -> void:
 	var discard_zone := scene.get_node("%DiscardZone") as PanelContainer
 	var discard_zone_label := scene.get_node("%DiscardZoneLabel") as Label
 	var block_label := scene.get_node("%PlayerBlockLabel") as Label
-	# 拖叠：两张打击合成一张（费用 3）
-	var strike_a := _first_live_button(hand_box, "打击")
-	check(_drag_card_to(scene, strike_a, play_box), "摆第一张打击")
+	# 拖叠：两张普通魔弹合成一张（费用 3）
+	var strike_a := _first_live_button(hand_box, "普通魔弹")
+	check(_drag_card_to(scene, strike_a, play_box), "摆第一张普通魔弹")
 	_check_cost_label(scene, "Cost 11 / 12", "摆放后可用 Cost 11/12")
 	await process_frame  # 等容器重排完成，新卡牌 rect 才可命中
-	var strike_b := _first_live_button(hand_box, "打击")
-	check(strike_b != null, "手里还有第二张打击")
-	var staged_button := _first_live_button(play_box, "打击")
+	var strike_b := _first_live_button(hand_box, "普通魔弹")
+	check(strike_b != null, "手里还有第二张普通魔弹")
+	var staged_button := _first_live_button(play_box, "普通魔弹")
 	var drag_data: Variant = strike_b._get_drag_data(Vector2.ZERO)
 	var staged_point: Vector2 = scene.get_global_transform().affine_inverse() * staged_button.get_global_rect().get_center()
 	check(scene._can_drop_data(staged_point, drag_data), "悬停同类已摆牌被接受")
 	check((staged_button as CardButton).is_merge_highlighted(), "可叠目标描金高亮")
 	scene._drop_data(staged_point, drag_data)
 	check(scene.state.staged.size() == 1, "合成为一张，占同一卡槽")
-	check(scene.state.staged[0].display_name == "打击＋打击" and scene.state.staged[0].cost == 3, "合成牌 打击＋打击，费用 3")
+	check(scene.state.staged[0].display_name == "普通魔弹＋普通魔弹" and scene.state.staged[0].cost == 3, "合成牌 普通魔弹＋普通魔弹，费用 3")
 	check(_count_live_card_buttons(hand_box) == 3, "手牌消耗一张（5→4→3）")
 	_check_cost_label(scene, "Cost 9 / 12", "合成后出牌区合计 3，可用 Cost 9/12")
-	var merged_button := _first_live_button(play_box, "打击＋打击")
+	var merged_button := _first_live_button(play_box, "普通魔弹＋普通魔弹")
 	check(merged_button != null, "出牌区显示合成牌")
 	# 拖回拆开：两张原牌回手，费用不花
 	check(_drag_card_to(scene, merged_button, hand_box), "拖回手牌区")
@@ -1787,23 +2032,23 @@ func test_scene_stacking() -> void:
 	check(_count_live_card_buttons(hand_box) == 5, "拆开回手两张，手牌回到 5")
 	_check_cost_label(scene, "Cost 12 / 12", "拆开后 Cost 复原 12/12")
 	# 增幅牌：灰显、不可摆、拖拽悬停出现触发预告
-	var quench_button := _first_live_button(hand_box, "淬火")
+	var quench_button := _first_live_button(hand_box, "灼印")
 	check(quench_button != null and quench_button.modulate.r < 1.0, "增幅牌灰显（不可摆放）")
 	check(quench_button.tooltip_text.contains("不能打出"), "增幅牌提示说明玩法")
 	var quench_data: Variant = quench_button._get_drag_data(Vector2.ZERO)
 	var discard_point: Vector2 = scene.get_global_transform().affine_inverse() * discard_zone.get_global_rect().get_center()
 	check(scene._can_drop_data(discard_point, quench_data), "增幅牌只能投弃牌区")
 	check(scene._drag_target_now == "discard", "悬停目标为弃牌区")
-	check(discard_zone_label.text.contains("弃掉「淬火」") and discard_zone_label.text.contains("本回合伤害 +2"), "弃牌预告显示触发效果")
+	check(discard_zone_label.text.contains("弃掉「灼印」") and discard_zone_label.text.contains("本回合伤害 +2"), "弃牌预告显示触发效果")
 	scene._drop_data(discard_point, quench_data)
-	check(scene.state.turn_attack_bonus == 2, "弃掉淬火，本回合伤害 +2")
+	check(scene.state.turn_attack_bonus == 2, "弃掉灼印，本回合伤害 +2")
 	check(block_label.text.contains("本回合攻击 +2"), "状态行显示本回合加成")
-	check(_find_card(scene.state.discard_pile, "quench") >= 0, "淬火进弃牌堆")
+	check(_find_card(scene.state.discard_pile, "quench") >= 0, "灼印进弃牌堆")
 	# 加成在打出时生效（2+2=4），下一回合回归
-	var strike_c := _first_live_button(hand_box, "打击")
-	check(_drag_card_to(scene, strike_c, play_box), "摆一张打击吃加成")
+	var strike_c := _first_live_button(hand_box, "普通魔弹")
+	check(_drag_card_to(scene, strike_c, play_box), "摆一张普通魔弹吃加成")
 	(scene.get_node("%CommitButton") as Button).pressed.emit()
-	check(scene.state.enemy_hp == BattleConfig.PRACTICE_ENEMY_HP - 4, "打击 2+2=4 伤（木桩 48→44）")
+	check(scene.state.enemy_hp == BattleConfig.PRACTICE_ENEMY_HP - 4, "普通魔弹 2+2=4 伤（木桩 48→44）")
 	check(scene.state.turn_attack_bonus == 0, "新回合加成归零")
 	check(not block_label.text.contains("本回合攻击"), "状态行加成收起")
 	viewport.queue_free()
@@ -1816,6 +2061,8 @@ func test_engine_drag_input() -> void:
 	if packed == null:
 		return
 	var scene: Variant = packed.instantiate()
+	# 注入确定性卡组：新默认卡组只有 4 张普通魔弹，若开局没摸到会找不到按钮
+	scene.configure(BattleState.Mode.TUTORIAL, ["strike", "strike", "strike", "strike", "strike", "guard", "guard", "guard"])
 	var viewport := _attach_scene(scene)
 	await process_frame
 	await process_frame
@@ -1823,8 +2070,8 @@ func test_engine_drag_input() -> void:
 	var play_box := scene.get_node("%PlayBox") as HBoxContainer
 	var play_panel := scene.get_node("%PlayZonePanel") as PanelContainer
 	var play_base_border: Color = (play_panel.get_theme_stylebox("panel") as StyleBoxFlat).border_color
-	var strike_button := _first_live_button(hand_box, "打击")
-	check(strike_button != null, "手里有打击")
+	var strike_button := _first_live_button(hand_box, "普通魔弹")
+	check(strike_button != null, "手里有普通魔弹")
 	if strike_button == null:
 		viewport.queue_free()
 		await process_frame
@@ -1851,10 +2098,10 @@ func test_engine_drag_input() -> void:
 	check(scene.state.staged.size() == 1, "真实拖拽把牌放进了出牌区")
 	_check_cost_label(scene, "Cost 11 / 12", "引擎级拖拽摆放后左上角可用 Cost 实时下调（11/12）")
 	if scene.state.staged.size() == 1:
-		check(scene.state.staged[0].id == "strike", "放进去的正是被拖的打击")
+		check(scene.state.staged[0].id == "strike", "放进去的正是被拖的普通魔弹")
 	check(_count_live_card_buttons(hand_box) == 4, "手牌跟着少一张")
 	# 出牌区拖回手牌（撤回），同样走引擎级真实拖拽
-	var staged_button := _first_live_button(play_box, "打击")
+	var staged_button := _first_live_button(play_box, "普通魔弹")
 	check(staged_button != null and staged_button.drag_zone == "play", "出牌区的牌可拖回")
 	if staged_button != null:
 		var back_from: Vector2 = staged_button.get_global_rect().get_center()
@@ -1870,8 +2117,8 @@ func test_engine_drag_input() -> void:
 	# 弃牌区同样走引擎级真实拖拽（PanelContainer 默认 STOP 会静默拦截投放，2026-10-03 修复）
 	scene.state.gain_card(CardDB.get_card("wrath"))
 	await process_frame
-	var wrath_button := _first_live_button(hand_box, "暴怒")
-	check(wrath_button != null, "手里出现暴怒")
+	var wrath_button := _first_live_button(hand_box, "懒惰")
+	check(wrath_button != null, "手里出现懒惰")
 	if wrath_button != null:
 		var discard_to: Vector2 = (scene.get_node("%DiscardZone") as PanelContainer).get_global_rect().get_center()
 		var wrath_from: Vector2 = wrath_button.get_global_rect().get_center()
@@ -1881,10 +2128,10 @@ func test_engine_drag_input() -> void:
 		check(scene._drag_target_now == "discard", "引擎拖拽悬停弃牌区")
 		_push_mouse_button(viewport, discard_to, false)
 		_check_cost_label(scene, "Cost 17 / 12", "引擎级拖拽弃牌 +5（17/12）")
-		check(_find_card(scene.state.discard_pile, "wrath") >= 0, "暴怒经引擎拖拽进了弃牌堆")
+		check(_find_card(scene.state.discard_pile, "wrath") >= 0, "懒惰经引擎拖拽进了弃牌堆")
 	# 手牌拖出后在非弃牌区松手（例：日志区）＝自动摆进出牌区（日志区控件必须 IGNORE，否则引擎拖放被静默拦截）
-	var strike_free := _first_live_button(hand_box, "打击")
-	check(strike_free != null, "手里还有打击可拖")
+	var strike_free := _first_live_button(hand_box, "普通魔弹")
+	check(strike_free != null, "手里还有普通魔弹可拖")
 	if strike_free != null:
 		var free_from: Vector2 = strike_free.get_global_rect().get_center()
 		var free_to := Vector2(640.0, 255.0)
@@ -1895,12 +2142,12 @@ func test_engine_drag_input() -> void:
 		_push_mouse_button(viewport, free_to, false)
 		check(scene.state.staged.size() == 1, "在日志区松手，牌自动摆进出牌区")
 	await process_frame  # 等容器重排完成，出牌区新按钮 rect 才可命中
-	# 引擎级拖叠：手里剩下的打击拖到出牌区已摆的打击上 → 合成一张（描金高亮 → 松手合成）
-	var merge_from_button := _first_live_button(hand_box, "打击")
-	check(merge_from_button != null, "手里还有打击可拖（用于叠）")
+	# 引擎级拖叠：手里剩下的普通魔弹拖到出牌区已摆的普通魔弹上 → 合成一张（描金高亮 → 松手合成）
+	var merge_from_button := _first_live_button(hand_box, "普通魔弹")
+	check(merge_from_button != null, "手里还有普通魔弹可拖（用于叠）")
 	if merge_from_button != null and scene.state.staged.size() == 1:
-		var staged_target := _first_live_button(play_box, "打击")
-		check(staged_target != null, "出牌区有打击作为叠合目标")
+		var staged_target := _first_live_button(play_box, "普通魔弹")
+		check(staged_target != null, "出牌区有普通魔弹作为叠合目标")
 		if staged_target != null:
 			var merge_from: Vector2 = merge_from_button.get_global_rect().get_center()
 			var merge_to: Vector2 = staged_target.get_global_rect().get_center()
@@ -1924,10 +2171,12 @@ func test_scene_hover_scale() -> void:
 	if packed == null:
 		return
 	var scene: Variant = packed.instantiate()
+	# 注入确定性卡组：新默认卡组只有 4 张普通魔弹，若开局没摸到会找不到按钮
+	scene.configure(BattleState.Mode.TUTORIAL, ["strike", "strike", "strike", "strike", "strike", "guard", "guard", "guard"])
 	var viewport := _attach_scene(scene)
 	await process_frame
 	var hand_box := scene.get_node("%HandBox") as Control
-	var card_button := _first_live_button(hand_box, "打击")
+	var card_button := _first_live_button(hand_box, "普通魔弹")
 	check(card_button != null, "手牌在场")
 	if card_button == null:
 		viewport.queue_free()
@@ -2073,6 +2322,8 @@ func test_scene_pile_counts() -> void:
 	if packed == null:
 		return
 	var scene: Variant = packed.instantiate()
+	# 注入确定性卡组：新默认卡组只有 4 张普通魔弹，若开局没摸到会找不到按钮
+	scene.configure(BattleState.Mode.TUTORIAL, ["strike", "strike", "strike", "strike", "strike", "guard", "guard", "guard"])
 	var viewport := _attach_scene(scene)
 	await process_frame
 	await process_frame
@@ -2089,10 +2340,10 @@ func test_scene_pile_counts() -> void:
 	await process_frame
 	check(hand_count.text == "手牌 4/8", "弃牌后手牌 4/8")
 	check(pile_count.text == "牌堆 3　弃牌堆 1", "弃牌后：牌堆 3、弃牌堆 1")
-	var strike_button := _first_live_button(hand_box, "打击")
-	check(strike_button != null, "手里还有打击")
+	var strike_button := _first_live_button(hand_box, "普通魔弹")
+	check(strike_button != null, "手里还有普通魔弹")
 	if strike_button != null:
-		check(_drag_card_to(scene, strike_button, play_box), "摆一张打击")
+		check(_drag_card_to(scene, strike_button, play_box), "摆一张普通魔弹")
 		(scene.get_node("%CommitButton") as Button).pressed.emit()
 		await process_frame
 		check(pile_count.text == "牌堆 0　弃牌堆 2", "打出并摸 3 张后：牌堆 0、弃牌堆 2（打出的牌入弃牌堆）")
@@ -2220,66 +2471,85 @@ func test_sfx_wiring() -> void:
 
 
 func test_main_flow_full() -> void:
-	print("[主流程：告知 → 教学 → 练习站组卡 → 木桩 → 转化 → 教程战 → 三问 → 层地图 → 返回主菜单]")
+	print("[主流程：初幕演出 → 教学战 → 教学说明 → 练习站 → 木桩 → 追及 → 教程战 → 三问 → 层地图 → 返回主菜单]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
+	var prologue_page := main.get_node("%ProloguePage") as Control
+	var prologue_button := prologue_page._continue_button as Button
+	var prologue_text := prologue_page._text_label as Label
 	var story_page := main.get_node("%StoryPage") as Control
 	var practice_page := main.get_node("%PracticePage") as Control
 	var battle_host := main.get_node("%BattleHost") as Control
 	var primary := main.get_node("%PrimaryButton") as Button
 	var secondary := main.get_node("%SecondaryButton") as Button
 	var story := main.get_node("%StoryText") as Label
-	check(story_page.visible, "开场在读白页")
-	check(story.text.contains("八层"), "召唤告知：世界是八层")
-	check(story.text.contains("清空"), "召唤告知：目标只说清空血量")
-	check(not story.text.contains("净化") and not story.text.contains("收下"), "告知边界：不提前提净化/收下")
-	check(not secondary.visible, "开场单按钮")
-	primary.pressed.emit()
-	check(story_page.visible, "读白后不绕中间页、继续留在读白页")
-	check(story.text.contains("打击") and story.text.contains("护住"), "未看教学时「继续」＝教学读白在屏")
-	check(not story.text.contains("净化"), "教学段也不提净化")
-	check(secondary.visible, "教学页出现「直接去台阶」")
+	check(prologue_page.visible, "无档开场＝初幕演出页")
+	check(not story_page.visible, "初幕期间读白页不出现")
+	check(prologue_text.text.contains("音海市"), "初幕第 1 拍：现世·夜（出租屋）")
+	# 9 拍：按 8 次到末拍「迎战」，再按 1 次结束演出
+	for _i in 8:
+		prologue_button.pressed.emit()
+	check(prologue_button.text == "迎战", "演出到末拍，按钮＝迎战")
+	check(prologue_text.text.contains("彻底污染"), "末拍：菲戈蕾被懒惰的力量彻底污染")
+	prologue_button.pressed.emit()
+	check(battle_host.get_child_count() == 1, "演出结束直接进入蜗牛教学战")
+	var teach_battle: Variant = battle_host.get_child(0)
+	check(teach_battle.state.mode == BattleState.Mode.TEACHING, "蜗牛教学战模式")
+	check((teach_battle.get_node("%EnemyNameLabel") as Label).text == "蜗牛怪物", "教学战波 1＝蜗牛怪物")
+	_check_cost_label(teach_battle, "Cost 4 / 4", "教学战单位制 4")
+	check((teach_battle.get_node("%TurnTimerLabel") as Label).text == "剩余 90 秒", "教学战时限 90 秒")
+	await process_frame
+	_drive_teaching_victory(teach_battle)
+	check(teach_battle.state.phase == BattleState.Phase.ENDED, "教学战三回合收尾")
+	await process_frame
+	check(story_page.visible and story.text.contains("练习站"), "教学战后进教学说明（指引去练习站）")
+	check(primary.text == "去练习站" and secondary.visible, "教学说明按钮：去练习站／直接前进")
 	primary.pressed.emit()
 	check(practice_page.visible, "进入练习站")
 	var warehouse := main.get_node("%WarehouseList") as VBoxContainer
-	check(_first_live_button(warehouse, "「打击」") != null, "仓库里有打击")
-	for i in 5:
-		var strike_button := _first_live_button(warehouse, "「打击」")
-		check(strike_button != null, "第 %d 张打击按钮在场" % (i + 1))
+	check(_first_live_button(warehouse, "「普通魔弹」") != null, "仓库里有普通魔弹")
+	for i in 4:
+		var strike_button := _first_live_button(warehouse, "「普通魔弹」")
+		check(strike_button != null, "第 %d 张普通魔弹按钮在场" % (i + 1))
 		if strike_button != null:
 			strike_button.pressed.emit()
-	for i in 3:
-		var guard_button := _first_live_button(warehouse, "「护住」")
-		check(guard_button != null, "第 %d 张护住按钮在场" % (i + 1))
+	for i in 2:
+		var heavy_button := _first_live_button(warehouse, "「强力魔弹」")
+		check(heavy_button != null, "第 %d 张强力魔弹按钮在场" % (i + 1))
+		if heavy_button != null:
+			heavy_button.pressed.emit()
+	for i in 2:
+		var guard_button := _first_live_button(warehouse, "「普通防御」")
+		check(guard_button != null, "第 %d 张普通防御按钮在场" % (i + 1))
 		if guard_button != null:
 			guard_button.pressed.emit()
 	var start_button := main.get_node("%StartPracticeButton") as Button
-	check((main.get_node("%DeckCountLabel") as Label).text == "卡组 8 / 8", "卡组计数更新")
+	check((main.get_node("%DeckCountLabel") as Label).text == "卡组 8 / 8", "卡组计数更新（4 魔弹＋2 强弹＋2 防御）")
 	check(not start_button.disabled, "8 张组好后可开打")
 	start_button.pressed.emit()
 	check(battle_host.get_child_count() == 1, "练习战进入战斗位")
-	var battle: Variant = battle_host.get_child(0)
-	check(battle.state.mode == BattleState.Mode.PRACTICE, "是练习模式")
-	check(battle.state.enemy_name == "木桩", "对手是木桩")
+	var practice_battle: Variant = battle_host.get_child(0)
+	check(practice_battle.state.mode == BattleState.Mode.PRACTICE, "是练习模式")
+	check(practice_battle.state.enemy_name == "木桩", "对手是木桩")
 	await process_frame
-	_press_strikes_until_over(battle)
-	check(battle.state.phase == BattleState.Phase.ENDED, "木桩被打倒")
-	var practice_continue := battle.get_node("%ContinueButton") as Button
+	_press_strikes_until_over(practice_battle)
+	check(practice_battle.state.phase == BattleState.Phase.ENDED, "木桩被打倒")
+	var practice_continue := practice_battle.get_node("%ContinueButton") as Button
 	check(practice_continue.text == "返回练习站", "练习结束按钮")
 	practice_continue.pressed.emit()
 	check(practice_page.visible, "回到练习站")
 	await process_frame
 	check(battle_host.get_child_count() == 0, "练习战斗已释放")
 	(main.get_node("%LeavePracticeButton") as Button).pressed.emit()
-	check(story_page.visible, "离开练习站后回到读白页")
-	check(story.text.contains("清空"), "转化读白：目标仍是清空血量")
-	check(not story.text.contains("净化"), "告知边界：转化页也不提净化")
+	check(story_page.visible, "离开练习站后回到读白页（追及段）")
+	check(story.text.contains("清空") and story.text.contains("菲戈蕾"), "追及读白：向菲戈蕾方向前进、目标清空血量")
+	check(not story.text.contains("净化时刻"), "告知边界：追及页不提前提净化")
 	primary.pressed.emit()
 	check(battle_host.get_child_count() == 1, "教程战进入战斗位")
 	var battle2: Variant = battle_host.get_child(0)
 	check(battle2.state.mode == BattleState.Mode.TUTORIAL, "是教程模式")
 	check(battle2.state.enemy_name == "贝尔芬格", "对手是贝尔芬格")
-	_check_cost_label(battle2, "Cost 12 / 12", "教程战 Cost 显示 12/12")
+	_check_cost_label(battle2, "Cost 12 / 12", "教程战恢复 Cost 12 体系")
 	check(battle2.state.draw_pile.size() + battle2.state.hand.size() == BattleConfig.DECK_SIZE, "教程战用练习站自组的 8 张卡组")
 	battle2.state.debug_force_plays = 0
 	await process_frame
@@ -2298,9 +2568,10 @@ func test_main_flow_full() -> void:
 	var transition_page := main.get_node("%TransitionPage") as Control
 	var map_page := main.get_node("%MapPage") as Control
 	check(transition_page.visible, "教程战结束进入上行过渡页")
-	check((transition_page._read_text as Label).text.contains("贝尔芬格"), "同行过渡读白在屏上")
+	check((transition_page._read_text as Label).text.contains("菲戈蕾"), "同行过渡读白在屏上（菲戈蕾人身）")
 	check(main.run.tutorial_done, "教程标记完成")
-	check(main.run.companions.has("贝尔芬格"), "贝尔芬格入同行列")
+	check(main.run.companions.has("菲戈蕾"), "菲戈蕾入同行列")
+	check(main.pool.owned_count("wrath") == 1, "懒惰罪卡入库")
 	var trans_continue := _first_live_button(transition_page, "继续")
 	check(trans_continue != null, "过渡页有继续按钮")
 	trans_continue.pressed.emit()
@@ -2324,7 +2595,7 @@ func test_main_flow_full() -> void:
 
 
 func test_main_flow_skip_practice() -> void:
-	print("[主流程·跳过练习：未看教学直接去台阶，用默认卡组打教程战]")
+	print("[主流程·跳过练习：教学说明直接前进，用默认卡组打教程战]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
 	var story_page := main.get_node("%StoryPage") as Control
@@ -2333,10 +2604,18 @@ func test_main_flow_skip_practice() -> void:
 	var story := main.get_node("%StoryText") as Label
 	var battle_host := main.get_node("%BattleHost") as Control
 	check(not MAIN_FLOW_SCRIPT.open_practice_on_ready, "常规启动不带练习站直开标记")
-	primary.pressed.emit()
-	check(story_page.visible and story.text.contains("打击"), "未看教学时「继续」＝教学读白")
+	var prologue_page := main.get_node("%ProloguePage") as Control
+	var prologue_button := prologue_page._continue_button as Button
+	for _i in 9:
+		prologue_button.pressed.emit()
+	check(battle_host.get_child_count() == 1, "初幕结束进入教学战")
+	var teach_battle: Variant = battle_host.get_child(0)
+	await process_frame
+	_drive_teaching_victory(teach_battle)
+	await process_frame
+	check(story_page.visible and story.text.contains("练习站"), "教学说明在屏")
 	secondary.pressed.emit()
-	check(story.text.contains("清空"), "「直接去台阶」＝转化读白在屏")
+	check(story.text.contains("清空") and story.text.contains("菲戈蕾"), "「直接前进」＝追及读白在屏")
 	primary.pressed.emit()
 	check(battle_host.get_child_count() == 1, "直接进入教程战")
 	var battle: Variant = battle_host.get_child(0)
@@ -2359,7 +2638,7 @@ func test_main_menu_practice_entry() -> void:
 	var reached_main := live_main != null and String(live_main.scene_file_path) == "res://scenes/main.tscn"
 	check(reached_main, "练习站按钮进入主场景")
 	if reached_main:
-		check((live_main.get_node("%PracticePage") as Control).visible, "进入即是练习站页（跳过召唤告知）")
+		check((live_main.get_node("%PracticePage") as Control).visible, "进入即是练习站页（跳过初幕/路线）")
 		check(not MAIN_FLOW_SCRIPT.open_practice_on_ready, "启动标记已消费")
 		(live_main.get_node("%LeavePracticeButton") as Button).pressed.emit()
 		await process_frame
@@ -2383,8 +2662,8 @@ func test_main_flow_layer2() -> void:
 	main.run.route = _fixture_route()
 	main.run.route_layer = main.run.current_layer
 	main.run.rng.seed = 20261005
-	(main.get_node("%PrimaryButton") as Button).pressed.emit()
-	check(map_page.visible, "召唤告知「继续」直达层地图")
+	main._open_map()
+	check(map_page.visible, "置教程完成后直达层地图")
 	# 第一列·事件（粉雾）：点节点＝弹确认窗，确认主按钮才入关（design-round5.md §0.2/0.4）
 	var overlay := main.get_node("%ConfirmOverlay") as Control
 	var confirm_title := main.get_node("%ConfirmTitle") as Label
@@ -2526,13 +2805,17 @@ func test_confirm_deck_flow() -> void:
 	check(not overlay.visible, "跳组卡时确认窗收起")
 	check(practice_page.visible, "进入组卡界面")
 	var warehouse := main.get_node("%WarehouseList") as VBoxContainer
-	check(_first_live_button(warehouse, "「打击」") != null, "组卡界面仓库在屏")
-	for i in 5:
-		var strike_button := _first_live_button(warehouse, "「打击」")
+	check(_first_live_button(warehouse, "「普通魔弹」") != null, "组卡界面仓库在屏")
+	for i in 4:
+		var strike_button := _first_live_button(warehouse, "「普通魔弹」")
 		if strike_button != null:
 			strike_button.pressed.emit()
-	for i in 3:
-		var guard_button := _first_live_button(warehouse, "「护住」")
+	for i in 2:
+		var heavy_button := _first_live_button(warehouse, "「强力魔弹」")
+		if heavy_button != null:
+			heavy_button.pressed.emit()
+	for i in 2:
+		var guard_button := _first_live_button(warehouse, "「普通防御」")
 		if guard_button != null:
 			guard_button.pressed.emit()
 	check((main.get_node("%DeckCountLabel") as Label).text == "卡组 8 / 8", "组卡生效（8/8）")
@@ -2556,6 +2839,47 @@ func test_confirm_deck_flow() -> void:
 	await process_frame
 
 
+func test_teaching_defeat_restart() -> void:
+	print("[教学战失败：判负覆盖层→再来一次重开本战；教程层主战失败回追及段（不重看初幕）]")
+	SaveGame.disabled = true
+	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport := _attach_scene(main)
+	await process_frame
+	var prologue_page := main.get_node("%ProloguePage") as Control
+	var battle_host := main.get_node("%BattleHost") as Control
+	for _i in 9:
+		(prologue_page._continue_button as Button).pressed.emit()
+	check(battle_host.get_child_count() == 1, "初幕走完进入教学战")
+	var first: Variant = battle_host.get_child(0)
+	check(first.state.mode == BattleState.Mode.TEACHING and first.state.player_hp == 8, "教学战首战：8 血")
+	# 打空自己的血 → 判负覆盖层（教学文案＋「再来一次」）
+	first.state._damage_player(99)
+	check(first.state.phase == BattleState.Phase.DEFEAT, "生命归零判负")
+	var overlay := first.get_node("%Overlay") as Control
+	var continue_button := first.get_node("%ContinueButton") as Button
+	check(overlay.visible, "判负覆盖层出现")
+	check((first.get_node("%StoryText") as Label).text == BattleConfig.TEXT_DEFEAT_TEACHING, "判负读白＝教学文案")
+	check(continue_button.text == BattleConfig.TEXT_DEFEAT_RETRY, "按钮＝再来一次")
+	continue_button.pressed.emit()
+	check(main._battle != null and main._battle != first, "重开新战实例")
+	check(main._battle.state.player_hp == 8 and main._battle.state.mode == BattleState.Mode.TEACHING, "满状态重开本战")
+	await process_frame
+	check(battle_host.get_child_count() == 1 and battle_host.get_child(0) == main._battle, "旧战释放、新战入场")
+	check(not prologue_page.visible, "不重看初幕演出")
+	# 教程层主战失败 → 回追及段读白（TEXT_TRANSFORM，而非初幕）
+	main._battle_context = "tutorial"
+	main._on_battle_lost()
+	await process_frame
+	var story_page := main.get_node("%StoryPage") as Control
+	var story := main.get_node("%StoryText") as Label
+	check(story_page.visible and story.text.contains("清空"), "回追及段（目标清空血量）")
+	check(story.text.contains("菲戈蕾") and not story.text.contains("音海市"), "追及段不重看初幕")
+	check((main.get_node("%PrimaryButton") as Button).text == "打倒她", "追及段主按钮＝打倒她")
+	check(battle_host.get_child_count() == 0, "战斗位已清空")
+	viewport.queue_free()
+	await process_frame
+
+
 func test_save_roundtrip() -> void:
 	print("[存档：写盘→读档→还原（进度＋卡池＋路线＋类型归一）；坏档容错]")
 	var path := "user://save_test_roundtrip.json"
@@ -2568,7 +2892,7 @@ func test_save_roundtrip() -> void:
 	run.chosen = chosen
 	run.column_index = 1
 	run.collect_sin("lust")
-	run.add_companion("贝尔芬格")
+	run.add_companion("菲戈蕾")
 	run.route = _fixture_route()
 	run.route_layer = 2
 	var pool := CardPool.new()
@@ -2583,7 +2907,7 @@ func test_save_roundtrip() -> void:
 	SaveGame.apply_progress(data, run2, pool2)
 	check(run2.tutorial_done and run2.current_layer == 2, "进度还原")
 	check(run2.column_index == 1 and run2.chosen == [1], "选路还原")
-	check(run2.sin_cards == ["lust"] and run2.companions == ["贝尔芬格"], "收集还原")
+	check(run2.sin_cards == ["lust"] and run2.companions == ["菲戈蕾"], "收集还原")
 	check(pool2.owned_count("lust") == 1, "仓库罪卡还原")
 	check(pool2.deck == ["strike"], "卡组还原")
 	check(_route_signature(run2.route) == _route_signature(_fixture_route()), "路线还原")
@@ -2612,22 +2936,22 @@ func test_main_flow_save_resume() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	SaveGame.disabled = false
 	SaveGame.save_path = path
-	# 一：无档启动（从召唤告知走）→ 教程收尾即落盘
+	# 一：无档启动（从初幕演出走）→ 教程收尾即落盘
 	var main1: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport1 := _attach_scene(main1)
 	await process_frame
-	check((main1.get_node("%StoryPage") as Control).visible, "无档启动照旧走召唤告知")
+	check((main1.get_node("%ProloguePage") as Control).visible and not (main1.get_node("%StoryPage") as Control).visible, "无档启动走初幕演出")
 	main1._finish_tutorial()
 	check(FileAccess.file_exists(path), "教程完成即写盘")
 	viewport1.queue_free()
 	await process_frame
-	# 二：重启直达路线（跳过召唤告知）
+	# 二：重启直达路线（跳过初幕）
 	var main2: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport2 := _attach_scene(main2)
 	await process_frame
 	var map2 := main2.get_node("%MapPage") as Control
-	check(map2.visible and not (main2.get_node("%StoryPage") as Control).visible, "有档启动直达路线")
-	check(main2.run.tutorial_done and main2.run.companions.has("贝尔芬格"), "进度还原")
+	check(map2.visible and not (main2.get_node("%ProloguePage") as Control).visible, "有档启动直达路线")
+	check(main2.run.tutorial_done and main2.run.companions.has("菲戈蕾"), "进度还原")
 	check(not (main2.get_node("%ConfirmOverlay") as Control).visible, "直达不出弹窗")
 	# 三：走一步（事件）→ 自动存盘 → 再重启续到第二列
 	main2.run.route = _fixture_route()

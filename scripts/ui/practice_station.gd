@@ -89,5 +89,5 @@ func _hint_text() -> String:
 	if pool.deck.size() < BattleConfig.DECK_SIZE:
 		return "还差 %d 张——点击左边仓库里的牌加入卡组。" % (BattleConfig.DECK_SIZE - pool.deck.size())
 	if not pool.is_deck_valid():
-		return "卡组里至少要有一张能打伤害的牌（比如「打击」）。"
+		return "卡组里至少要有一张能打伤害的牌（比如「普通魔弹」）。"
 	return "卡组就绪，可以开打了。"

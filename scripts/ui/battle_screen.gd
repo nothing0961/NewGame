@@ -22,7 +22,7 @@ const FAN_BOTTOM_MARGIN := 12.0
 
 const SFX_DIR := "res://assets/audio/sfx/"
 const SFX_EXTS: Array[String] = [".ogg", ".wav", ".mp3"]
-const SFX_BY_CARD := {"strike": "sfx_hit", "guard": "sfx_guard", "call": "sfx_call"}
+const SFX_BY_CARD := {"strike": "sfx_hit", "guard": "sfx_guard", "call": "sfx_call", "heal": "sfx_absorb", "cleanse": "sfx_strip", "greed_shot": "sfx_hit"}
 
 signal battle_ended(practice: bool)
 # 判负（教程战/层战）；main_flow 收到后回该层第一关（教程层回序章）
@@ -58,6 +58,7 @@ var state: BattleState
 var overlay_mode := OVERLAY_NONE
 var debrief_index := 0
 var turn_time_left := BattleConfig.TURN_TIME_LIMIT
+var _enemy_list_label: Label = null
 var _turn_discard_gain := 0
 var _drag_zone_source := ""
 var _drag_target_now := ""
@@ -97,11 +98,14 @@ func _ready() -> void:
 	quit_practice_button.pressed.connect(_on_quit_practice_pressed)
 	quit_practice_button.visible = _battle_mode == BattleState.Mode.PRACTICE
 	_setup_zone_styles()
+	_build_enemy_list_label()
 	hand_box.resized.connect(_layout_hand)
 	if _battle_mode == BattleState.Mode.PRACTICE:
 		state.start_practice(_deck)
 	elif _battle_mode == BattleState.Mode.STORY:
 		state.start_story(_deck, _stage)
+	elif _battle_mode == BattleState.Mode.TEACHING:
+		state.start_teaching()
 	else:
 		state.start(_deck)
 	if state.sin_card_id != "":
@@ -168,8 +172,9 @@ func _sync_ui() -> void:
 	enemy_hand_label.visible = state.mode != BattleState.Mode.PRACTICE
 	player_hp_label.text = "你：%d / %d" % [state.player_hp, BattleConfig.PLAYER_MAX_HP]
 	# 显示本回合「可用」Cost＝现有 − 出牌区已摆：摆放/收回/弃牌都实时反映
-	cost_label.text = "回合 %d　Cost %d / %d" % [state.turn_count, maxi(0, state.player_cost - state.staged_cost()), BattleConfig.PLAYER_MAX_COST]
-	var block_line := "护住 %d" % state.player_block
+	cost_label.text = "回合 %d　Cost %d / %d" % [state.turn_count, maxi(0, state.player_cost - state.staged_cost()), state.max_cost]
+	_update_enemy_list()
+	var block_line := "格挡 %d" % state.player_block
 	if state.attack_bonus > 0:
 		block_line += "　攻击 +%d" % state.attack_bonus
 	if state.turn_attack_bonus > 0:
@@ -523,7 +528,7 @@ func _on_phase(phase: int) -> void:
 	match phase:
 		BattleState.Phase.PLAYER:
 			_set_overlay(OVERLAY_NONE)
-			turn_time_left = BattleConfig.TURN_TIME_LIMIT
+			turn_time_left = _turn_time_limit()
 			_update_timer_label()
 			_turn_discard_gain = 0
 			_update_discard_zone()
@@ -558,7 +563,11 @@ func _set_overlay(mode: String) -> void:
 	if mode == OVERLAY_PRACTICE_END:
 		continue_button.text = "返回练习站"
 	elif mode == OVERLAY_DEFEAT:
-		continue_button.text = BattleConfig.TEXT_DEFEAT_BUTTON
+		# 层战：回层首；教程战/教学战：原地重开（main_flow 分支处理）
+		if state.mode == BattleState.Mode.STORY:
+			continue_button.text = BattleConfig.TEXT_DEFEAT_BUTTON
+		else:
+			continue_button.text = BattleConfig.TEXT_DEFEAT_RETRY
 	discard_scroll.visible = mode == OVERLAY_DISCARD
 	match mode:
 		OVERLAY_STRIP:
@@ -570,7 +579,7 @@ func _set_overlay(mode: String) -> void:
 		OVERLAY_PRACTICE_END:
 			story_text.text = state.practice_end_text
 		OVERLAY_DEFEAT:
-			story_text.text = BattleConfig.TEXT_DEFEAT
+			story_text.text = BattleConfig.TEXT_DEFEAT if state.mode == BattleState.Mode.STORY else BattleConfig.TEXT_DEFEAT_TEACHING
 		OVERLAY_DISCARD:
 			_rebuild_discard_list()
 
@@ -655,9 +664,49 @@ func _load_sfx(sfx_name: String) -> AudioStream:
 	return null
 
 
+func _turn_time_limit() -> float:
+	if _battle_mode == BattleState.Mode.TEACHING:
+		return BattleConfig.TEACHING_TURN_TIME_LIMIT
+	return BattleConfig.TURN_TIME_LIMIT
+
+
 func _update_timer_label() -> void:
 	turn_timer_label.text = "剩余 %d 秒" % int(ceil(turn_time_left))
 	if turn_time_left <= TIMER_WARN_SECONDS:
 		turn_timer_label.add_theme_color_override("font_color", TIMER_WARN_COLOR)
 	else:
 		turn_timer_label.remove_theme_color_override("font_color")
+
+
+# 多敌人（教学战波次）时右上角逐行显示各敌人血量；单敌隐藏，保持原 EnemyName/Hp 显示
+func _build_enemy_list_label() -> void:
+	_enemy_list_label = Label.new()
+	_enemy_list_label.name = "EnemyListLabel"
+	_enemy_list_label.visible = false
+	_enemy_list_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_enemy_list_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_enemy_list_label.offset_left = -380.0
+	_enemy_list_label.offset_top = 20.0
+	_enemy_list_label.offset_right = -24.0
+	_enemy_list_label.offset_bottom = 160.0
+	_enemy_list_label.add_theme_font_size_override("font_size", 15)
+	_enemy_list_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_enemy_list_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_child(_enemy_list_label)
+
+
+func _update_enemy_list() -> void:
+	if _enemy_list_label == null:
+		return
+	if state.enemies.size() <= 1:
+		_enemy_list_label.visible = false
+		return
+	var lines := PackedStringArray()
+	for enemy in state.enemies:
+		var hp: int = int(enemy["hp"])
+		if hp <= 0:
+			lines.append("%s　已倒下" % String(enemy["name"]))
+		else:
+			lines.append("%s　%d / %d" % [String(enemy["name"]), hp, int(enemy["max_hp"])])
+	_enemy_list_label.text = "\n".join(lines)
+	_enemy_list_label.visible = true

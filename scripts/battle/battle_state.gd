@@ -2,7 +2,8 @@ class_name BattleState
 extends RefCounted
 
 enum Phase { PLAYER, STRIP, DEBRIEF, DEFEAT, ENDED }
-enum Mode { TUTORIAL, PRACTICE, STORY }
+# TEACHING 追加在末尾：枚举值不做持久化，追加零风险
+enum Mode { TUTORIAL, PRACTICE, STORY, TEACHING }
 
 signal log_event(text: String)
 signal stats_changed()
@@ -14,12 +15,41 @@ signal card_discarded(card: CardData)
 signal card_merged(merged: CardData)
 
 var mode: int = Mode.TUTORIAL
-var enemy_name := BattleConfig.ENEMY_NAME
-var enemy_max_hp := BattleConfig.ENEMY_MAX_HP
+# 多敌人（教学战波次）：元素 {name, hp, max_hp, sleeping}；单敌战斗只有一个元素
+var enemies: Array[Dictionary] = []
+
+# 单敌读写面（测试与 UI 沿用以「当前敌人」）：get → 首个存活项（全灭回退第一项）；set → 写首个存活项
+var enemy_name: String:
+	get:
+		var index := _active_enemy_index()
+		return String(enemies[index].get("name", "")) if index >= 0 else ""
+	set(value):
+		var index := _active_enemy_index()
+		if index >= 0:
+			enemies[index]["name"] = value
+
+var enemy_max_hp: int:
+	get:
+		var index := _active_enemy_index()
+		return int(enemies[index].get("max_hp", 0)) if index >= 0 else 0
+	set(value):
+		var index := _active_enemy_index()
+		if index >= 0:
+			enemies[index]["max_hp"] = value
+
+var enemy_hp: int:
+	get:
+		var index := _active_enemy_index()
+		return int(enemies[index].get("hp", 0)) if index >= 0 else 0
+	set(value):
+		var index := _active_enemy_index()
+		if index >= 0:
+			enemies[index]["hp"] = value
+
 var enemy_deck_composition: Dictionary = {}
-# 层主战：胜利后走净化/收下（教程战同为层主战）；层内小怪战：胜利直接结束
+# 层主战：胜利后走净化/收下（教程层主战同为层主战）；层内小怪战：胜利直接结束
 var is_boss := true
-# 本场收下（吸收）的罪卡；教程＝暴怒，层主战由关卡配置给出
+# 本场收下（吸收）的罪卡；教程层＝懒惰，层主战由关卡配置给出
 var sin_card_id := BattleConfig.SIN_CARD_ID
 var strip_lines: Array = BattleConfig.TEXT_STRIP
 var purify_lines: Array = BattleConfig.TEXT_PURIFY
@@ -27,12 +57,19 @@ var practice_end_text := BattleConfig.TEXT_PRACTICE_END
 
 var player_hp := 0
 var player_cost := 0
+# 每回合魔力上限：常规 12；蜗牛教学战为 4（单位制）
+var max_cost := BattleConfig.PLAYER_MAX_COST
 var player_block := 0
-var enemy_hp := 0
 var attack_bonus := 0
 var turn_attack_bonus := 0  # 「弃掉：本回合伤害 +N」类效果，回合开始时清零
 var enemy_suppressed := false
 var debug_force_plays := -1  # -1=随机出牌数, 0..n=强制出牌数（仅测试用）
+
+# 教学战状态：波次索引、睡意（到点未免疫则跳过一回合）、净化免疫
+var teaching_wave_index := 0
+var pending_sleep := false
+var sleep_deadline_turn := 0
+var sleep_immune := false
 
 var phase: int = Phase.PLAYER
 var draw_pile: Array[CardData] = []
@@ -70,6 +107,12 @@ func start_practice(custom_deck: Array = []) -> void:
 func start_story(custom_deck: Array, stage: Dictionary) -> void:
 	_stage = stage
 	_setup(Mode.STORY, custom_deck)
+
+
+# 蜗牛教学战：忽略传入卡组，使用钉死牌组（不洗牌）
+func start_teaching() -> void:
+	_stage = {}
+	_setup(Mode.TEACHING, [])
 
 
 func can_afford(card: CardData) -> bool:
@@ -153,13 +196,13 @@ func stage_card(hand_index: int) -> bool:
 	return true
 
 
-# 堆叠：手牌里同大类的牌可叠到出牌区已摆牌上（罪/敌方/增幅除外），合成牌占同一卡槽
+# 堆叠：手牌里同大类的牌可叠到出牌区已摆牌上（罪/敌方/增幅/核心除外），合成牌占同一卡槽
 func can_merge_with(card: CardData, staged_index: int) -> bool:
 	if phase != Phase.PLAYER or batch_committed:
 		return false
 	if staged_index < 0 or staged_index >= staged.size():
 		return false
-	if card.kind == CardData.Kind.SIN or card.kind == CardData.Kind.ENEMY or card.kind == CardData.Kind.AMPLIFY:
+	if card.kind == CardData.Kind.SIN or card.kind == CardData.Kind.ENEMY or card.kind == CardData.Kind.AMPLIFY or card.kind == CardData.Kind.CORE:
 		return false
 	var target: CardData = staged[staged_index]
 	if card.kind != target.kind:
@@ -303,11 +346,16 @@ func commit_staged() -> bool:
 		else:
 			discard_pile.append(card)
 	_check_sin_unlock()
-	if enemy_hp <= 0:
+	if _all_enemies_dead():
 		if mode == Mode.PRACTICE:
 			_end_practice(true)
 		elif mode == Mode.STORY and not is_boss:
 			_end_story_stage()
+		elif mode == Mode.TEACHING:
+			if teaching_wave_index >= BattleConfig.TEACHING_WAVES.size() - 1:
+				_end_teaching()
+			else:
+				_advance_wave()
 		else:
 			_enter_strip()
 	else:
@@ -398,34 +446,46 @@ func finish_debrief() -> bool:
 
 func _setup(new_mode: int, custom_deck: Array) -> void:
 	mode = new_mode
+	var enemy_decl: Array = []
 	if mode == Mode.PRACTICE:
-		enemy_name = BattleConfig.PRACTICE_ENEMY_NAME
-		enemy_max_hp = BattleConfig.PRACTICE_ENEMY_HP
+		enemy_decl = [{"name": BattleConfig.PRACTICE_ENEMY_NAME, "hp": BattleConfig.PRACTICE_ENEMY_HP}]
 		enemy_deck_composition = {}
 		is_boss = false
 		sin_card_id = ""
 		strip_lines = []
 		purify_lines = []
 	elif mode == Mode.STORY:
-		enemy_name = String(_stage.get("enemy", ""))
-		enemy_max_hp = int(_stage.get("enemy_hp", BattleConfig.ENEMY_MAX_HP))
+		enemy_decl = [{"name": String(_stage.get("enemy", "")), "hp": int(_stage.get("enemy_hp", BattleConfig.ENEMY_MAX_HP))}]
 		enemy_deck_composition = _stage.get("enemy_deck", {})
 		is_boss = bool(_stage.get("boss", false))
 		sin_card_id = String(_stage.get("sin_card", ""))
 		strip_lines = _stage.get("strip_lines", [])
 		purify_lines = _stage.get("purify_lines", [])
+	elif mode == Mode.TEACHING:
+		enemy_decl = []  # 波次敌人由 _spawn_wave 按 TEACHING_WAVES 建
+		enemy_deck_composition = BattleConfig.TEACHING_ENEMY_DECK
+		is_boss = false
+		sin_card_id = ""
+		strip_lines = []
+		purify_lines = []
 	else:
-		enemy_name = BattleConfig.ENEMY_NAME
-		enemy_max_hp = BattleConfig.ENEMY_MAX_HP
+		enemy_decl = [{"name": BattleConfig.ENEMY_NAME, "hp": BattleConfig.ENEMY_MAX_HP}]
 		enemy_deck_composition = BattleConfig.ENEMY_DECK_COMPOSITION
 		is_boss = true  # 教程战＝懒惰层主战：打倒后走净化
 		sin_card_id = BattleConfig.SIN_CARD_ID
 		strip_lines = BattleConfig.TEXT_STRIP
 		purify_lines = BattleConfig.TEXT_PURIFY
-	player_hp = BattleConfig.PLAYER_MAX_HP
-	player_cost = BattleConfig.PLAYER_MAX_COST
+	enemies.clear()
+	for decl in enemy_decl:
+		enemies.append(_make_enemy(String(decl["name"]), int(decl["hp"])))
+	teaching_wave_index = 0
+	pending_sleep = false
+	sleep_deadline_turn = 0
+	sleep_immune = false
+	player_hp = BattleConfig.TEACHING_PLAYER_HP if mode == Mode.TEACHING else BattleConfig.PLAYER_MAX_HP
+	max_cost = BattleConfig.TEACHING_MAX_COST if mode == Mode.TEACHING else BattleConfig.PLAYER_MAX_COST
+	player_cost = max_cost
 	player_block = 0
-	enemy_hp = enemy_max_hp
 	attack_bonus = 0
 	enemy_suppressed = false
 	phase = Phase.PLAYER
@@ -438,6 +498,8 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 	collection.clear()
 	_build_deck(custom_deck)
 	_build_enemy_deck()
+	if mode == Mode.TEACHING:
+		_spawn_wave(0)
 	if mode == Mode.PRACTICE:
 		log_event.emit(BattleConfig.TEXT_PRACTICE_START)
 	# 开局：双方各摸五张
@@ -445,12 +507,21 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 	if mode != Mode.PRACTICE:
 		_draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, BattleConfig.HAND_SIZE)
 	_start_player_turn()
+	if mode == Mode.TEACHING:
+		for line in BattleConfig.TEXT_TEACHING_START:
+			log_event.emit(line)
 
 
 func _build_deck(custom_deck: Array) -> void:
 	draw_pile.clear()
 	hand.clear()
 	discard_pile.clear()
+	if mode == Mode.TEACHING:
+		# 教学牌组钉死：数组顺序＝摸牌顺序（反向入堆配合 pop_back），不洗牌、不检定罪卡
+		for i in range(BattleConfig.TEACHING_DECK.size() - 1, -1, -1):
+			draw_pile.append(CardDB.get_card(String(BattleConfig.TEACHING_DECK[i])))
+		deck_sin_id = ""
+		return
 	if custom_deck.is_empty():
 		for card_id in BattleConfig.DECK_COMPOSITION:
 			for _i in BattleConfig.DECK_COMPOSITION[card_id]:
@@ -515,12 +586,19 @@ func _gain_round_cards() -> void:
 func _start_player_turn() -> void:
 	turn_count += 1
 	player_block = 0
-	player_cost = BattleConfig.PLAYER_MAX_COST
+	player_cost = max_cost
 	turn_attack_bonus = 0
 	batch_committed = false
 	phase = Phase.PLAYER
 	_check_sin_unlock()
 	log_event.emit("—— 你的回合 ——")
+	# 睡意到点仍未免疫 → 跳过这一回合（一次）；免疫过则不再触发
+	if pending_sleep and turn_count >= sleep_deadline_turn:
+		pending_sleep = false
+		player_cost = 0
+		log_event.emit(BattleConfig.TEXT_SLEEP_SKIP)
+	if mode == Mode.TEACHING:
+		_emit_teaching_turn_hint()
 	phase_changed.emit(phase)
 	stats_changed.emit()
 
@@ -530,6 +608,9 @@ func _enemy_turn() -> void:
 	if mode == Mode.PRACTICE:
 		log_event.emit(BattleConfig.TEXT_PRACTICE_IDLE)
 		return
+	if mode == Mode.TEACHING and _all_enemies_sleeping():
+		log_event.emit(BattleConfig.TEXT_ENEMY_SLEEPING % enemy_name)
+		return
 	if enemy_suppressed:
 		enemy_suppressed = false
 		log_event.emit(BattleConfig.TEXT_SUPPRESSED)
@@ -538,10 +619,11 @@ func _enemy_turn() -> void:
 	if plays <= 0:
 		log_event.emit(BattleConfig.TEXT_ENEMY_IDLE % enemy_name)
 		return
-	if plays >= 2:
-		log_event.emit(BattleConfig.TEXT_ENEMY_DOMINANT)
-	else:
-		log_event.emit(BattleConfig.TEXT_ENEMY_RESISTING)
+	if mode != Mode.TEACHING:
+		if plays >= 2:
+			log_event.emit(BattleConfig.TEXT_ENEMY_DOMINANT)
+		else:
+			log_event.emit(BattleConfig.TEXT_ENEMY_RESISTING)
 	# 整批一次结算：倒下时法阵拉回是整回合的结果，不在牌堆中间被再次打穿
 	var total_damage := 0
 	for _i in plays:
@@ -556,6 +638,8 @@ func _enemy_turn() -> void:
 func _decide_enemy_plays() -> int:
 	if debug_force_plays >= 0:
 		return min(debug_force_plays, enemy_hand.size())
+	if mode == Mode.TEACHING:
+		return min(1, enemy_hand.size())  # 教学战钉死每回合至多一张
 	return randi_range(0, enemy_hand.size())
 
 
@@ -572,8 +656,30 @@ func _apply_effect(effect: Dictionary, card_name: String, via_discard := false) 
 	match String(effect.get("op", "")):
 		"deal_damage":
 			var damage: int = int(effect.get("amount", 0)) + attack_bonus + turn_attack_bonus
-			enemy_hp = max(0, enemy_hp - damage)
-			log_event.emit("%s受到 %d 点伤害。" % [enemy_name, damage])
+			if String(effect.get("target", "")) == "all":
+				for enemy in enemies:
+					if int(enemy["hp"]) <= 0:
+						continue
+					_damage_enemy(enemy, damage, effect)
+			else:
+				var target_index := _active_enemy_index()
+				if target_index >= 0:
+					_damage_enemy(enemies[target_index], damage, effect)
+		"heal":
+			var heal_amount: int = int(effect.get("amount", 0))
+			var healed: int = mini(heal_amount, BattleConfig.PLAYER_MAX_HP - player_hp)
+			player_hp += healed
+			if healed > 0:
+				log_event.emit("你恢复了 %d 点生命。（生命 %d）" % [healed, player_hp])
+			else:
+				log_event.emit("生命已经满了，没有恢复的必要。")
+		"cleanse":
+			sleep_immune = true
+			if pending_sleep:
+				pending_sleep = false
+				log_event.emit(BattleConfig.TEXT_CLEANSE_SLEEP)
+			else:
+				log_event.emit(BattleConfig.TEXT_CLEANSE)
 		"gain_block":
 			var amount: int = int(effect.get("amount", 0))
 			player_block += amount
@@ -584,9 +690,9 @@ func _apply_effect(effect: Dictionary, card_name: String, via_discard := false) 
 		"suppress_enemy_attack":
 			enemy_suppressed = true
 			if mode == Mode.PRACTICE:
-				log_event.emit("你喊：「回来！」木桩纹丝不动——它本来就不动。")
+				log_event.emit("你喝止了一声。木桩纹丝不动——它本来就不动。")
 			else:
-				log_event.emit("你喊：「回来！」她愣住，抬起头。")
+				log_event.emit("你喝止了一声。她愣住，抬起头。")
 		"buff_attack_permanent":
 			var bonus: int = int(effect.get("amount", 0))
 			attack_bonus += bonus
@@ -611,9 +717,9 @@ func _damage_player(amount: int) -> void:
 	var to_hp: int = amount - blocked
 	if blocked > 0:
 		if to_hp == 0:
-			log_event.emit("它整个被「护住」挡住了。")
+			log_event.emit("它整个被挡住了。")
 		else:
-			log_event.emit("「护住」挡下 %d 点。" % blocked)
+			log_event.emit("挡下 %d 点。" % blocked)
 	if to_hp > 0:
 		player_hp = max(0, player_hp - to_hp)
 		log_event.emit("你受到 %d 点伤害。（生命 %d）" % [to_hp, player_hp])
@@ -628,7 +734,10 @@ func _handle_defeat() -> void:
 		_end_practice(false)
 		return
 	phase = Phase.DEFEAT
-	log_event.emit(BattleConfig.TEXT_DEFEAT)
+	if mode == Mode.STORY:
+		log_event.emit(BattleConfig.TEXT_DEFEAT)
+	else:
+		log_event.emit(BattleConfig.TEXT_DEFEAT_TEACHING)
 	phase_changed.emit(phase)
 
 
@@ -648,3 +757,78 @@ func _end_story_stage() -> void:
 	phase = Phase.ENDED
 	log_event.emit(BattleConfig.TEXT_STAGE_WIN)
 	phase_changed.emit(phase)
+
+
+func _make_enemy(name: String, hp: int) -> Dictionary:
+	return {"name": name, "hp": hp, "max_hp": hp, "sleeping": false}
+
+
+# 对单个敌人结算伤害：bonus_vs="sleeping" 时对沉睡目标追加 bonus（强欲魔弹追伤）
+func _damage_enemy(enemy: Dictionary, base_damage: int, effect: Dictionary) -> void:
+	var damage := base_damage
+	if String(effect.get("bonus_vs", "")) == "sleeping" and bool(enemy.get("sleeping", false)):
+		damage += int(effect.get("bonus", 0))
+	enemy["hp"] = max(0, int(enemy["hp"]) - damage)
+	log_event.emit("%s受到 %d 点伤害。" % [String(enemy["name"]), damage])
+
+
+# 教学战波次：清空当前敌人，按 TEACHING_WAVES[index] 起新一波（count 只影响数量）
+func _spawn_wave(index: int) -> void:
+	teaching_wave_index = index
+	var wave: Dictionary = BattleConfig.TEACHING_WAVES[index]
+	var count: int = int(wave.get("count", 1))
+	var name := String(wave.get("name", ""))
+	var hp: int = int(wave.get("hp", 1))
+	enemies.clear()
+	for _i in count:
+		enemies.append(_make_enemy(name, hp))
+
+
+# 波 1 全灭 → 波 2：群怪沉睡登场 + 睡意倒计时（到时未免疫则跳过一回合）
+func _advance_wave() -> void:
+	_spawn_wave(teaching_wave_index + 1)
+	for enemy in enemies:
+		enemy["sleeping"] = true
+	log_event.emit(BattleConfig.TEXT_TEACHING_FIRST_FELL)
+	log_event.emit(BattleConfig.TEXT_TEACHING_SLEEP_EVENT)
+	log_event.emit(BattleConfig.TEXT_TEACHING_SLEEP_HINT)
+	pending_sleep = true
+	sleep_deadline_turn = turn_count + BattleConfig.TEACHING_SLEEP_DELAY
+	_finish_round()
+
+
+func _end_teaching() -> void:
+	phase = Phase.ENDED
+	log_event.emit(BattleConfig.TEXT_TEACHING_WIN)
+	phase_changed.emit(phase)
+
+
+func _all_enemies_dead() -> bool:
+	for enemy in enemies:
+		if int(enemy["hp"]) > 0:
+			return false
+	return not enemies.is_empty()
+
+
+func _all_enemies_sleeping() -> bool:
+	if enemies.is_empty():
+		return false
+	for enemy in enemies:
+		if int(enemy["hp"]) > 0 and not bool(enemy.get("sleeping", false)):
+			return false
+	return true
+
+
+# 当前敌人＝首个存活项；全灭回退第一项（结算收尾读值）；空数组 → -1
+func _active_enemy_index() -> int:
+	for i in enemies.size():
+		if int(enemies[i]["hp"]) > 0:
+			return i
+	return 0 if not enemies.is_empty() else -1
+
+
+func _emit_teaching_turn_hint() -> void:
+	if pending_sleep:
+		log_event.emit(BattleConfig.TEXT_TEACHING_TURN_WAVE2)
+	elif teaching_wave_index == 0 and turn_count >= 2 and not _all_enemies_dead():
+		log_event.emit(BattleConfig.TEXT_TEACHING_TURN_KILL)

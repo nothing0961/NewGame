@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_card")
 id = "heavy_strike"
-display_name = "重击"
+display_name = "强力魔弹"
 kind = 0
 cost = 1
 text = "造成 4 点伤害。"

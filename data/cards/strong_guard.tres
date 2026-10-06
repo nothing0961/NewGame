@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_card")
 id = "strong_guard"
-display_name = "坚守"
+display_name = "坚固防御"
 kind = 1
 cost = 1
 text = "挡下 3 点伤害。"

@@ -5,11 +5,11 @@
 [resource]
 script = ExtResource("1_card")
 id = "call"
-display_name = "呼喊"
+display_name = "震慑"
 kind = 2
 cost = 1
-text = "喊：「回来！」\n她愣住，抬起头——这一回合她没有打你，只是小声说：「……对不起。」"
-flavor = "在这一侧没有人认识你。可「回来」两个字，她听得见。"
+text = "压制——这一回合，敌方不会攻击。\n她愣住，抬起头，只是小声说：「……对不起。」"
+flavor = "在这一侧没有人认识你。可她听得见你。"
 permanent = false
 effects = Array[Dictionary]([{
 "op": "suppress_enemy_attack"

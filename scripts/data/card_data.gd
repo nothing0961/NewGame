@@ -1,8 +1,8 @@
 class_name CardData
 extends Resource
 
-# AMPLIFY 追加为 5：.tres 里 kind 存整数，旧牌重编号会全盘错位
-enum Kind { ATTACK, DEFENSE, UTILITY, ENEMY, SIN, AMPLIFY }
+# AMPLIFY 追加为 5、CORE 追加为 6：.tres 里 kind 存整数，旧牌重编号会全盘错位
+enum Kind { ATTACK, DEFENSE, UTILITY, ENEMY, SIN, AMPLIFY, CORE }
 
 @export var id: String = ""
 @export var display_name: String = ""
@@ -38,4 +38,6 @@ func kind_label() -> String:
 		Kind.AMPLIFY:
 			# 呈现层并入功能类（黄框）：机制不变，标签统一显示「功能」
 			return "功能"
+		Kind.CORE:
+			return "核心"
 	return ""
