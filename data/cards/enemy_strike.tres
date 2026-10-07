@@ -8,10 +8,10 @@ id = "enemy_strike"
 display_name = "打"
 kind = 3
 cost = 1
-text = "造成 1 点伤害。"
+text = "造成 2 点伤害。"
 flavor = ""
 permanent = false
 effects = Array[Dictionary]([{
 "op": "deal_damage",
-"amount": 1
+"amount": 2
 }])

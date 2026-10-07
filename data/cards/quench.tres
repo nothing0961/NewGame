@@ -8,11 +8,11 @@ id = "quench"
 display_name = "灼印"
 kind = 5
 cost = 1
-text = "弃掉：本回合伤害 +2。"
+text = "弃掉：本回合伤害 +3。"
 flavor = "烧掉一点什么，手就不会抖。"
 permanent = false
 effects = Array[Dictionary]([])
 discard_effects = Array[Dictionary]([{
 "op": "buff_attack_turn",
-"amount": 2
+"amount": 3
 }])

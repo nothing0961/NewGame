@@ -8,10 +8,10 @@ id = "heal"
 display_name = "治疗术"
 kind = 2
 cost = 1
-text = "恢复 3 点生命。"
+text = "恢复 4 点生命。"
 flavor = "从树上摔下来的那点疼，很快就散了。"
 permanent = false
 effects = Array[Dictionary]([{
 "op": "heal",
-"amount": 3
+"amount": 4
 }])

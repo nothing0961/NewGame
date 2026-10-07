@@ -57,7 +57,7 @@ var practice_end_text := BattleConfig.TEXT_PRACTICE_END
 
 var player_hp := 0
 var player_cost := 0
-# 每回合魔力上限：常规 12；蜗牛教学战为 4（单位制）
+# 每回合魔力上限：常规 6；蜗牛教学战为 4（单位制）
 var max_cost := BattleConfig.PLAYER_MAX_COST
 var player_block := 0
 var attack_bonus := 0
@@ -373,8 +373,17 @@ func gain_card(card: CardData) -> void:
 	stats_changed.emit()
 
 
+func hand_limit() -> int:
+	return BattleConfig.TEACHING_HAND_LIMIT if mode == Mode.TEACHING else BattleConfig.HAND_LIMIT
+
+
+# 教学战上限 10（摔伤 8 → 治疗回满 10）；常规战 20
+func player_max_hp() -> int:
+	return BattleConfig.TEACHING_PLAYER_MAX_HP if mode == Mode.TEACHING else BattleConfig.PLAYER_MAX_HP
+
+
 func needs_discard() -> bool:
-	return hand.size() > BattleConfig.HAND_LIMIT
+	return hand.size() > hand_limit()
 
 
 func discard_from_hand(index: int) -> bool:
@@ -573,7 +582,7 @@ func _draw_from(source: Array[CardData], discard: Array[CardData], target: Array
 	return drawn
 
 
-# 一轮结束：敌人回合 → 双方各摸三张 → 新的玩家回合
+# 一轮结束：敌人回合 → 双方各摸牌（常规 4 / 教学战 3）→ 新的玩家回合
 func _finish_round() -> void:
 	log_event.emit("—— %s的回合 ——" % enemy_name)
 	_enemy_turn()
@@ -584,10 +593,12 @@ func _finish_round() -> void:
 
 
 func _gain_round_cards() -> void:
-	var player_drawn := _draw_from(draw_pile, discard_pile, hand, BattleConfig.ROUND_GAIN)
+	# 教学战沿用旧摸牌数：钉死牌序按 5＋3 水位编排（design/design-round9.md）
+	var gain := BattleConfig.TEACHING_ROUND_GAIN if mode == Mode.TEACHING else BattleConfig.ROUND_GAIN
+	var player_drawn := _draw_from(draw_pile, discard_pile, hand, gain)
 	log_event.emit(BattleConfig.TEXT_ROUND_GAIN_PLAYER % player_drawn)
 	if mode != Mode.PRACTICE:
-		var enemy_drawn := _draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, BattleConfig.ROUND_GAIN)
+		var enemy_drawn := _draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, gain)
 		log_event.emit(BattleConfig.TEXT_ROUND_GAIN_ENEMY % [enemy_name, enemy_drawn])
 
 
@@ -648,10 +659,10 @@ func _decide_enemy_plays() -> int:
 		return min(debug_force_plays, enemy_hand.size())
 	if mode == Mode.TEACHING:
 		return min(1, enemy_hand.size())  # 教学战钉死每回合至多一张
-	return randi_range(0, enemy_hand.size())
+	return mini(randi_range(0, enemy_hand.size()), BattleConfig.ENEMY_MAX_PLAYS_PER_TURN)
 
 
-# 敌方牌的效果按「对玩家」解释，返回这张牌造成的伤害（现只有占位 1 伤）
+# 敌方牌的效果按「对玩家」解释，返回这张牌造成的伤害（敌牌「打」现为 2 伤）
 func _enemy_card_damage(card: CardData) -> int:
 	var total := 0
 	for effect in card.effects:
@@ -675,7 +686,7 @@ func _apply_effect(effect: Dictionary, card_name: String, via_discard := false) 
 					_damage_enemy(enemies[target_index], damage, effect)
 		"heal":
 			var heal_amount: int = int(effect.get("amount", 0))
-			var healed: int = mini(heal_amount, BattleConfig.PLAYER_MAX_HP - player_hp)
+			var healed: int = mini(heal_amount, player_max_hp() - player_hp)
 			player_hp += healed
 			if healed > 0:
 				log_event.emit("你恢复了 %d 点生命。（生命 %d）" % [healed, player_hp])

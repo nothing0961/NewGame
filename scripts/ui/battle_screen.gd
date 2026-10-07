@@ -172,7 +172,7 @@ func _sync_ui() -> void:
 	enemy_hp_label.text = "生命 %d / %d" % [state.enemy_hp, state.enemy_max_hp]
 	enemy_hand_label.text = "手牌 %d 张" % state.enemy_hand.size()
 	enemy_hand_label.visible = state.mode != BattleState.Mode.PRACTICE
-	player_hp_label.text = "你：%d / %d" % [state.player_hp, BattleConfig.PLAYER_MAX_HP]
+	player_hp_label.text = "你：%d / %d" % [state.player_hp, state.player_max_hp()]
 	# 显示本回合「可用」Cost＝现有 − 出牌区已摆：摆放/收回/弃牌都实时反映
 	cost_label.text = "回合 %d　Cost %d / %d" % [state.turn_count, maxi(0, state.player_cost - state.staged_cost()), state.max_cost]
 	_update_enemy_list()
@@ -182,8 +182,8 @@ func _sync_ui() -> void:
 	if state.turn_attack_bonus > 0:
 		block_line += "　本回合攻击 +%d" % state.turn_attack_bonus
 	player_block_label.text = block_line
-	hand_count_label.text = "手牌 %d/%d" % [state.hand.size(), BattleConfig.HAND_LIMIT]
-	if state.hand.size() >= BattleConfig.HAND_LIMIT:
+	hand_count_label.text = "手牌 %d/%d" % [state.hand.size(), state.hand_limit()]
+	if state.hand.size() >= state.hand_limit():
 		hand_count_label.add_theme_color_override("font_color", HAND_COUNT_WARN_COLOR)
 	else:
 		hand_count_label.remove_theme_color_override("font_color")
@@ -591,7 +591,7 @@ func _show_debrief_question() -> void:
 
 
 func _rebuild_discard_list() -> void:
-	story_text.text = BattleConfig.TEXT_DISCARD % [BattleConfig.HAND_LIMIT, state.hand.size() - BattleConfig.HAND_LIMIT]
+	story_text.text = BattleConfig.TEXT_DISCARD % [state.hand_limit(), state.hand.size() - state.hand_limit()]
 	for child in discard_box.get_children():
 		child.hide()
 		child.queue_free()

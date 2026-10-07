@@ -82,9 +82,9 @@ func reset_layer() -> void:
 	pending_hp_delta = 0
 
 
-# 事件效果合入层内续航修正：clamp 到 [-9, 0]（入场 HP 至少留 1）
+# 事件效果合入层内续航修正：clamp 到 [1 - PLAYER_MAX_HP, 0]（入场 HP 至少留 1）
 func apply_hp_delta(delta: int) -> void:
-	pending_hp_delta = clampi(pending_hp_delta + delta, -9, 0)
+	pending_hp_delta = clampi(pending_hp_delta + delta, 1 - BattleConfig.PLAYER_MAX_HP, 0)
 
 
 func entry_hp() -> int:

@@ -115,6 +115,27 @@ func _find_card(cards: Array[CardData], card_id: String) -> int:
 	return -1
 
 
+# 钉死随机开局手：从抽牌堆换入 card_id 直到手里至少 count 张（对换不增减，牌组张数守恒）
+func _pin_hand_cards(state: BattleState, card_id: String, count: int) -> void:
+	var have := 0
+	for card in state.hand:
+		if card.id == card_id:
+			have += 1
+	while have < count:
+		var pile_index := _find_card(state.draw_pile, card_id)
+		var hand_index := -1
+		for i in state.hand.size():
+			if state.hand[i].id != card_id:
+				hand_index = i
+				break
+		if pile_index < 0 or hand_index < 0:
+			return
+		var swapped: CardData = state.hand[hand_index]
+		state.hand[hand_index] = state.draw_pile[pile_index]
+		state.draw_pile[pile_index] = swapped
+		have += 1
+
+
 # 把手里所有匹配的牌摆进出牌区（摆不下的跳过）
 func _stage_all(state: BattleState, card_id: String) -> void:
 	var index := 0
@@ -445,7 +466,7 @@ func test_wrath_effects() -> void:
 
 
 func test_sin_unlock_rules() -> void:
-	print("[罪卡规则：任务+8回合保底解锁、每场仅一次]")
+	print("[罪卡规则：任务+5回合保底解锁、每场仅一次]")
 	var logs: Array = []
 	var state := _make_sin_state(logs)
 	state.debug_force_plays = 0
@@ -485,13 +506,13 @@ func test_sin_unlock_rules() -> void:
 	state.hand.append(CardDB.get_card("wrath"))
 	check(not state.can_stage(CardDB.get_card("wrath")), "同一场第二张同 id 罪卡也被禁止")
 	check(state.sin_lock_reason().contains("已经用过了"), "已用提示在")
-	# 保底路径：新的一场只过回合不出攻击牌，第 8 回合解锁
+	# 保底路径：新的一场只过回合不出攻击牌，第 5 回合解锁
 	var state2 := _make_sin_state()
 	state2.debug_force_plays = 0
-	for _i in 7:
+	for _i in 4:
 		state2.end_turn()
-	check(state2.turn_count == 8, "已到第 8 回合")
-	check(state2.sin_available, "8 回合保底解锁")
+	check(state2.turn_count == 5, "已到第 5 回合")
+	check(state2.sin_available, "5 回合保底解锁")
 	check(state2.attack_plays_this_battle == 0, "全程没出攻击牌，纯保底")
 	# 新的一场重新检定
 	var state3 := _make_sin_state()
@@ -503,13 +524,13 @@ func test_sin_unlock_rules() -> void:
 	check(state4.deck_sin_id == "", "牌组无罪卡时无检定对象")
 	check(state4.sin_lock_reason() == "", "无罪卡时无封锁提示")
 	check(not state4.can_stage(CardDB.get_card("wrath")), "罪卡不在牌组里时也摆不出")
-	for _i in 8:
+	for _i in 5:
 		state4.end_turn()
-	check(not state4.sin_available, "无罪卡时过 8 回合也不解锁")
+	check(not state4.sin_available, "无罪卡时过 5 回合也不解锁")
 
 
 func test_new_card_effects() -> void:
-	print("[新卡：强力魔弹 4 伤 / 坚固防御 3 格挡 / 灵感抽 2]")
+	print("[新卡：强力魔弹 4 伤 / 坚固防御 5 格挡 / 灵感抽 2]")
 	var state := _make_state()
 	state.debug_force_plays = 0
 	state.hand.clear()
@@ -524,7 +545,7 @@ func test_new_card_effects() -> void:
 	state_g.hand.append(CardDB.get_card("strong_guard"))
 	state_g.stage_card(0)
 	state_g.commit_staged()
-	check(state_g.player_hp == BattleConfig.PLAYER_MAX_HP, "坚固防御 3 格挡挡下对方 2 点（同批结算生效）")
+	check(state_g.player_hp == BattleConfig.PLAYER_MAX_HP, "坚固防御 5 格挡挡下对方 2 张共 4 点（同批结算生效）")
 	# 灵感：抽 2 张进手；结算后过一轮，弃牌堆洗回再摸 1 张（供给见底能摸几张是几张）
 	var state2 := _make_state()
 	state2.debug_force_plays = 0
@@ -556,12 +577,14 @@ func test_guard_blocks_enemy_plays() -> void:
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 2
-	# 开局手牌从 8 张牌组随机摸 5，钉死手牌保证有普通防御
+	# 开局手牌从牌组随机摸 5，钉死手牌保证有两张普通防御（单张 2 格挡挡不满 2 张敌牌共 4 点）
 	state.hand.clear()
 	state.hand.append(CardDB.get_card("guard"))
+	state.hand.append(CardDB.get_card("guard"))
+	state.stage_card(0)
 	state.stage_card(0)
 	state.commit_staged()
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP, "对方两张占位牌共 2 点伤害被同批打出的普通防御完整挡下")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP, "对方两张占位牌共 4 点伤害被同批打出的两张普通防御完整挡下")
 	check(state.player_block == 0, "格挡正好用掉；新回合格挡清零")
 	check(state.phase != BattleState.Phase.DEFEAT, "没有倒下")
 	check(_log_contains(logs, "挡"), "日志记录了挡下")
@@ -588,7 +611,9 @@ func test_card_costs() -> void:
 	print("[卡牌 Cost]")
 	check(CardDB.get_card("strike").cost == 1, "普通魔弹 Cost 1")
 	check(CardDB.get_card("guard").cost == 1, "普通防御 Cost 1")
-	check(CardDB.get_card("call").cost == 1, "震慑 Cost 1")
+	check(CardDB.get_card("call").cost == 2, "震慑 Cost 2")
+	check(CardDB.get_card("heavy_strike").cost == 2, "强力魔弹 Cost 2")
+	check(CardDB.get_card("strong_guard").cost == 2, "坚固防御 Cost 2")
 	check(CardDB.get_card("wrath").cost == 6, "懒惰（罪牌）Cost 6")
 
 
@@ -596,9 +621,10 @@ func test_cost_pool() -> void:
 	print("[Cost 池：摆放不扣、打出结算、每回合重置]")
 	var state := _make_state()
 	state.debug_force_plays = 0
-	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "开局满 Cost（12/12）")
+	_pin_hand_cards(state, "strike", 1)
+	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "开局满 Cost（6/6）")
 	check(state.stage_card(_find_card(state.hand, "strike")), "普通魔弹可以摆进出牌区")
-	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "摆放不扣 Cost（12/12）")
+	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "摆放不扣 Cost（6/6）")
 	check(state.staged_cost() == 1, "出牌区合计 Cost 1")
 	check(state.recall_card(0), "可以收回")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "收回不补也不扣")
@@ -652,25 +678,25 @@ func test_practice_defeat() -> void:
 
 
 func test_staging_zone() -> void:
-	print("[出牌区：最多五张，越限或越额都摆不进]")
+	print("[出牌区：最多四张，越限或越额都摆不进]")
 	var state := _make_state()
 	var guard := 0
 	while not state.hand.is_empty() and guard < 10:
 		guard += 1
 		state.stage_card(0)
-	check(state.staged.size() == 5, "开局五张全部摆进")
-	check(state.hand.is_empty(), "手牌清空")
+	check(state.staged.size() == 4, "开局四槽摆满（第 5 张没槽位）")
+	check(state.hand.size() == 1, "手里还剩一张")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "摆放全程不扣 Cost")
 	state.gain_card(CardDB.get_card("strike"))
-	check(state.hand.size() == 1, "获得一张新牌")
+	check(state.hand.size() == 2, "获得一张新牌")
 	check(not state.can_stage(state.hand[0]), "出牌区满后不能继续摆")
 	check(not state.stage_card(0), "摆放被拒")
 	check(state.recall_card(2), "收回出牌区第 3 张")
-	check(state.staged.size() == 4, "收回后剩 4 张")
-	check(state.hand.size() == 2, "收回的牌回到手牌")
+	check(state.staged.size() == 3, "收回后剩 3 张")
+	check(state.hand.size() == 3, "收回的牌回到手牌")
 	check(state.can_stage(state.hand[0]), "空出卡槽后可以再摆")
 	check(state.stage_card(0), "重新摆进一张")
-	check(state.staged.size() == 5, "重回 5 张")
+	check(state.staged.size() == 4, "重回 4 张")
 	check(not state.recall_card(9), "越界收回被拒")
 	var state2 := BattleState.new()
 	state2.start(["strike", "strike", "strike", "strike", "strike"])
@@ -686,6 +712,7 @@ func test_commit_batch() -> void:
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 1
+	_pin_hand_cards(state, "strike", 2)
 	check(not state.commit_staged(), "空出牌区打不出")
 	state.stage_card(_find_card(state.hand, "strike"))
 	state.stage_card(_find_card(state.hand, "strike"))
@@ -706,7 +733,7 @@ func test_commit_batch() -> void:
 	check(strike_stock == 4, "四张普通魔弹都在牌堆里循环")
 	check(state.collection.is_empty(), "非永久牌不进收藏")
 	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 1, "打出后自动进入对方回合")
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "对方出了 1 张占位牌，打了 1 点")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 2, "对方出了 1 张占位牌，打了 2 点")
 	check(state.phase == BattleState.Phase.PLAYER, "回到新的玩家回合")
 	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "新回合 Cost 重置满")
 	check(state.can_stage(state.hand[0]), "新回合可以再摆")
@@ -718,6 +745,7 @@ func test_end_turn_settles_staged() -> void:
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 0
+	_pin_hand_cards(state, "strike", 1)
 	state.stage_card(_find_card(state.hand, "strike"))
 	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 0, "还没过回合")
 	state.end_turn()
@@ -730,7 +758,7 @@ func test_end_turn_settles_staged() -> void:
 
 
 func test_commit_ends_turn() -> void:
-	print("[手牌打空：这批打出后照样直接过回合]")
+	print("[打满出牌区：这批打出后照样直接过回合]")
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 0
@@ -738,25 +766,25 @@ func test_commit_ends_turn() -> void:
 	while not state.hand.is_empty() and guard < 10:
 		guard += 1
 		state.stage_card(0)
-	check(state.commit_staged(), "五张一起打出")
+	check(state.commit_staged(), "四张一起打出")
 	check(_count_log(logs, "—— 贝尔芬格的回合 ——") == 1, "打出后自动过了一次对方回合")
 	check(state.phase == BattleState.Phase.PLAYER, "回到玩家回合")
-	check(state.hand.size() == BattleConfig.ROUND_GAIN, "打空后过一轮，手里只剩新摸的三张")
+	check(state.hand.size() == 1 + BattleConfig.ROUND_GAIN, "剩 1 张＋摸 4 张＝5 张")
 
 
 func test_hand_limit() -> void:
-	print("[手牌上限 8：计数与弃牌]")
+	print("[手牌上限 7：计数与弃牌]")
 	var state := _make_state()
-	for _i in 3:
+	for _i in 2:
 		state.gain_card(CardDB.get_card("strike"))
-	check(state.hand.size() == BattleConfig.HAND_LIMIT, "手牌到上限 8")
+	check(state.hand.size() == BattleConfig.HAND_LIMIT, "手牌到上限 7")
 	check(not state.needs_discard(), "到上限还不需弃牌")
 	state.gain_card(CardDB.get_card("strike"))
-	check(state.hand.size() == 9, "第 9 张超出上限")
+	check(state.hand.size() == 8, "第 8 张超出上限")
 	check(state.needs_discard(), "超过上限需要弃牌")
 	check(not state.discard_from_hand(99), "越界弃牌被拒")
 	check(state.discard_from_hand(0), "弃掉一张")
-	check(state.hand.size() == BattleConfig.HAND_LIMIT, "回到 8 张")
+	check(state.hand.size() == BattleConfig.HAND_LIMIT, "回到 7 张")
 	check(not state.needs_discard(), "不再需要弃牌")
 	check(state.discard_pile.size() == 1, "弃掉的牌进弃牌堆")
 
@@ -766,20 +794,24 @@ func test_discard_for_cost() -> void:
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 0
+	# 钉死手牌：默认牌组随机首张可能是 2 费牌，弃牌收益断言会随洗牌浮动
+	state.hand.clear()
+	state.hand.append(CardDB.get_card("strike"))
+	state.hand.append(CardDB.get_card("strike"))
 	check(state.discard_for_cost(0) == 0, "弃一张 1 费牌 +0")
-	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "1 费牌不涨 Cost（12/12）")
+	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "1 费牌不涨 Cost（6/6）")
 	state.gain_card(CardDB.get_card("wrath"))
 	var wrath_index := _find_card(state.hand, "wrath")
 	check(wrath_index >= 0, "懒惰在手")
 	check(state.discard_for_cost(wrath_index) == 5, "弃 6 费懒惰 +5")
-	check(state.player_cost == BattleConfig.PLAYER_MAX_COST + 5, "Cost 可超上限（17/12）")
+	check(state.player_cost == BattleConfig.PLAYER_MAX_COST + 5, "Cost 可超上限（11/6）")
 	check(_log_contains(logs, "Cost +5"), "日志记录了获得点数")
 	check(_find_card(state.discard_pile, "wrath") >= 0, "弃掉的懒惰进弃牌堆")
 	check(state.discard_for_cost(99) == -1, "越界弃牌被拒")
 	check(state.discard_for_cost(-1) == -1, "负数下标被拒")
 	check(state.stage_card(_find_card(state.hand, "strike")), "摆一张普通魔弹")
 	check(state.commit_staged(), "打出结算")
-	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "打出即过回合，新回合重置回 12/12，超出作废")
+	check(state.player_cost == BattleConfig.PLAYER_MAX_COST, "打出即过回合，新回合重置回 6/6，超出作废")
 	check(state.discard_for_cost(0) >= 0, "新回合仍可主动弃牌换 Cost")
 	var state2 := BattleState.new()
 	state2.start()
@@ -788,8 +820,8 @@ func test_discard_for_cost() -> void:
 
 
 func test_round_gain_economy() -> void:
-	print("[一轮结束：双方各获得三张，没打完的保留]")
-	# 用户示例（设定文档）：手 5 张，打 3 张 → 剩 2＋3＝第二轮 5 张；敌人打 2 → 剩 3＋3＝6 张
+	print("[一轮结束：双方各获得四张，没打完的保留]")
+	# 用户示例（设定文档）：手 5 张，打 3 张 → 剩 2＋4＝第二轮 6 张；敌人打 2 → 剩 3＋4＝7 张
 	var state := _make_state()
 	state.debug_force_plays = 2
 	check(state.hand.size() == BattleConfig.HAND_SIZE, "开局玩家 5 张")
@@ -805,10 +837,10 @@ func test_round_gain_economy() -> void:
 		state.stage_card(_find_card(state.hand, "strike"))
 	check(state.staged.size() == 3, "玩家第一轮打出 3 张普通魔弹")
 	state.commit_staged()
-	check(state.hand.size() == 5, "玩家：剩 2 张＋摸 3 张＝第二轮 5 张")
-	check(state.enemy_hand.size() == 6, "敌人：出 2 张剩 3 张＋摸 3 张＝第二轮 6 张")
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 2, "敌人出的两张各打 1 点")
-	# 用户实测复现：牌组共 8 张，打 1 张 → 剩 4＋备用 3＝第二轮 7 张（牌组只有 5 张时供给不足会卡在 5 张）
+	check(state.hand.size() == 6, "玩家：剩 2 张＋摸 4 张＝第二轮 6 张")
+	check(state.enemy_hand.size() == 7, "敌人：出 2 张剩 3 张＋摸 4 张＝第二轮 7 张")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 4, "敌人出的两张各打 2 点（共 4 点）")
+	# 用户实测复现：牌组共 8 张，打 1 张 → 剩 4＋摸 4＝第二轮 8 张（摸牌会把刚打出的洗回弃牌堆补足）
 	var state2 := _make_state()
 	state2.debug_force_plays = 2
 	state2.hand.clear()
@@ -822,11 +854,12 @@ func test_round_gain_economy() -> void:
 		state2.draw_pile.append(CardDB.get_card("strike"))
 	check(state2.stage_card(_find_card(state2.hand, "strike")), "玩家第一轮打出 1 张普通魔弹")
 	state2.commit_staged()
-	check(state2.hand.size() == 7, "玩家：剩 4 张＋摸 3 张＝第二轮 7 张")
+	check(state2.hand.size() == 8, "玩家：剩 4 张＋摸 4 张＝第二轮 8 张")
+	check(state2.needs_discard(), "8 张超过上限 7，需要弃牌")
 
 
 func test_enemy_plays_cards() -> void:
-	print("[敌人真出牌：张数随机；每张 1 伤；打出的牌进敌方弃牌堆]")
+	print("[敌人真出牌：张数随机；每张 2 伤；打出的牌进敌方弃牌堆]")
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 0
@@ -835,7 +868,7 @@ func test_enemy_plays_cards() -> void:
 	check(_log_contains(logs, "没有出牌"), "日志写着没出牌")
 	state.debug_force_plays = 3
 	state.end_turn()
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 3, "出 3 张，每张 1 伤")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 6, "出 3 张，每张 2 伤（共 6 点）")
 	check(_log_contains(logs, BattleConfig.TEXT_ENEMY_DOMINANT), "多张时「它」占上风的它-她对读")
 	var deck_size: int = int(BattleConfig.ENEMY_DECK_COMPOSITION["enemy_strike"])
 	var stock: int = state.enemy_hand.size() + state.enemy_draw_pile.size() + state.enemy_discard_pile.size()
@@ -847,15 +880,25 @@ func test_enemy_plays_cards() -> void:
 	state.enemy_hand.append(CardDB.get_card("enemy_strike"))
 	state.debug_force_plays = 1
 	state.end_turn()
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 4, "再出 1 张（累计 4 点）")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 8, "再出 1 张（累计 8 点）")
 	check(_log_contains(logs, BattleConfig.TEXT_ENEMY_RESISTING), "单张时「她」还在挣的它-她对读")
 	check(state.enemy_hand.size() == 1, "供给见底时能摸几张是几张（只摸回 1 张）")
 	check(state.enemy_discard_pile.is_empty(), "打出的牌被洗回并摸走")
 	check(_log_contains(logs, BattleConfig.TEXT_ROUND_GAIN_ENEMY % ["贝尔芬格", 1]), "摸牌日志写着只获得 1 张")
+	# 随机路径（非 debug 强制）单回合承伤封顶：最多 2 张 × 2 伤
+	state.enemy_hand.clear()
+	state.enemy_draw_pile.clear()
+	state.enemy_discard_pile.clear()
+	for _i in 5:
+		state.enemy_hand.append(CardDB.get_card("enemy_strike"))
+	state.debug_force_plays = -1
+	var hp_before: int = state.player_hp
+	state.end_turn()
+	check(hp_before - state.player_hp <= BattleConfig.ENEMY_MAX_PLAYS_PER_TURN * 2, "随机出牌封顶：单回合最多 2 张共 4 点")
 
 
 func test_round_gain_hand_limit() -> void:
-	print("[每轮 +3 顶破手牌上限：超限触发强制弃牌]")
+	print("[每轮 +4 顶破手牌上限：超限触发强制弃牌]")
 	var state := BattleState.new()
 	var big_deck: Array = []
 	for _i in 14:
@@ -867,7 +910,7 @@ func test_round_gain_hand_limit() -> void:
 	while not state.needs_discard() and guard < 10:
 		guard += 1
 		state.end_turn()
-	check(state.hand.size() > BattleConfig.HAND_LIMIT, "连过几轮后手牌超过 8")
+	check(state.hand.size() > BattleConfig.HAND_LIMIT, "连过几轮后手牌超过 7")
 	check(state.needs_discard(), "超限需要强制弃牌")
 
 
@@ -893,15 +936,15 @@ func test_full_victory_flow() -> void:
 func test_custom_deck_battle() -> void:
 	print("[自组卡组开局]")
 	var state := BattleState.new()
-	state.start(["strike", "strike", "strike", "guard", "guard", "guard", "call", "call"])
-	check(state.hand.size() + state.draw_pile.size() == BattleConfig.DECK_SIZE, "牌堆里正好 8 张")
+	state.start(["strike", "strike", "strike", "strike", "guard", "guard", "guard", "heal", "heavy_strike", "heavy_strike"])
+	check(state.hand.size() + state.draw_pile.size() == BattleConfig.DECK_SIZE, "牌堆里正好 10 张")
 	var ids: Array = []
 	for card in state.hand:
 		ids.append(card.id)
 	for card in state.draw_pile:
 		ids.append(card.id)
 	ids.sort()
-	check(ids == ["call", "call", "guard", "guard", "guard", "strike", "strike", "strike"], "卡组构成正确")
+	check(ids == ["guard", "guard", "guard", "heal", "heavy_strike", "heavy_strike", "strike", "strike", "strike", "strike"], "卡组构成正确")
 	check(state.enemy_name == "贝尔芬格" and state.enemy_max_hp == BattleConfig.ENEMY_MAX_HP, "教程模式对手是贝尔芬格")
 
 
@@ -913,20 +956,22 @@ func test_card_pool() -> void:
 	check(not pool.is_deck_valid(), "空卡组不合法")
 	for _i in 4:
 		pool.add_to_deck("strike")
-	pool.add_to_deck("heavy_strike")
+	for _i in 2:
+		pool.add_to_deck("heavy_strike")
 	for _i in 3:
 		pool.add_to_deck("guard")
-	check(pool.deck.size() == BattleConfig.DECK_SIZE, "卡组满 8 张")
+	pool.add_to_deck("heal")
+	check(pool.deck.size() == BattleConfig.DECK_SIZE, "卡组满 10 张")
 	check(not pool.add_to_deck("guard"), "卡组已满不能再加")
-	check(pool.is_deck_valid(), "4 普通魔弹＋1 强力魔弹＋3 普通防御的卡组合法")
+	check(pool.is_deck_valid(), "4 普通魔弹＋2 强力魔弹＋3 普通防御＋1 治疗的卡组合法")
 	check(pool.remove_from_deck("strike"), "可以移出一张")
-	check(pool.deck.size() == BattleConfig.DECK_SIZE - 1, "移出后剩 7 张")
+	check(pool.deck.size() == BattleConfig.DECK_SIZE - 1, "移出后剩 9 张")
 	var pool2 := CardPool.new()
 	var pool_total := 0
 	for card_id in BattleConfig.WAREHOUSE_INITIAL:
 		pool_total += int(BattleConfig.WAREHOUSE_INITIAL[card_id])
-	check(pool_total == 20, "仓库初始卡池共 20 张（攻击 6＋防御 5＋功能 5＋核心 1＋增幅 3）")
-	check(pool2.owned_count("strike") == 4 and pool2.owned_count("guard") == 3 and pool2.owned_count("call") == 2, "仓库普通魔弹 4、普通防御 3、震慑 2")
+	check(pool_total == 24, "仓库初始卡池共 24 张（攻击 8＋防御 6＋功能 6＋核心 1＋增幅 3）")
+	check(pool2.owned_count("strike") == 5 and pool2.owned_count("guard") == 4 and pool2.owned_count("call") == 2, "仓库普通魔弹 5、普通防御 4、震慑 2")
 	check(pool2.owned_count("quench") == 1 and pool2.owned_count("surge") == 1 and pool2.owned_count("bulwark") == 1, "仓库增幅牌：灼印 1、蓄流 1、坚壁 1")
 	check(pool2.can_add("quench"), "增幅牌可以加进卡组")
 	for _i in 3:
@@ -934,19 +979,20 @@ func test_card_pool() -> void:
 	for _i in 2:
 		pool2.add_to_deck("call")
 	check(pool2.deck.size() == 5, "全用防御/功能牌只能凑 5 张")
-	check(not pool2.is_deck_valid(), "凑不满 8 张不合法")
+	check(not pool2.is_deck_valid(), "凑不满 10 张不合法")
 	pool2.add_to_deck("strike")
-	check(not pool2.is_deck_valid(), "有伤害牌但还没满 8 张仍不合法")
+	check(not pool2.is_deck_valid(), "有伤害牌但还没满 10 张仍不合法")
 	var pool3 := CardPool.new()
-	for _i in 8:
+	for _i in 10:
 		pool3.deck.append("guard")
-	check(not pool3.is_deck_valid(), "满 8 张但全无伤害牌不合法")
-	check(not pool2.add_to_deck("guard"), "超过仓库数量不能加（普通防御只有 3 张）")
+	check(not pool3.is_deck_valid(), "满 10 张但全无伤害牌不合法")
+	check(pool2.add_to_deck("guard"), "第 4 张普通防御可以加进卡组")
+	check(not pool2.add_to_deck("guard"), "超过仓库数量不能加（普通防御只有 4 张）")
 
 
 func test_amplify_cards() -> void:
 	print("[增幅牌：弃掉触发的本回合加成]")
-	# 灼印：弃掉后本回合伤害 +2；下回合回归
+	# 灼印：弃掉后本回合伤害 +3；下回合回归
 	var logs: Array = []
 	var state := _make_state(logs)
 	state.debug_force_plays = 0
@@ -955,25 +1001,25 @@ func test_amplify_cards() -> void:
 	state.hand.append(CardDB.get_card("strike"))
 	state.hand.append(CardDB.get_card("strike"))
 	check(state.discard_for_cost(0) == 0, "弃灼印（1 费）+0 Cost")
-	check(state.turn_attack_bonus == 2, "本回合伤害加成 +2")
-	check(_log_contains(logs, "本回合你的伤害 +2"), "弃牌触发日志出现")
+	check(state.turn_attack_bonus == 3, "本回合伤害加成 +3")
+	check(_log_contains(logs, "本回合你的伤害 +3"), "弃牌触发日志出现")
 	check(state.stage_card(0), "摆一张普通魔弹")
 	state.commit_staged()
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 4, "普通魔弹吃到加成（2+2=4 伤）")
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 5, "普通魔弹吃到加成（2+3=5 伤）")
 	check(state.turn_attack_bonus == 0, "新回合加成归零")
 	check(state.stage_card(0), "下回合再摆一张普通魔弹")
 	state.commit_staged()
-	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 6, "下回合回归 2 伤（累计 6）")
+	check(state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 7, "下回合回归 2 伤（累计 7）")
 	# 蓄流：弃掉 → 获得 3 点 Cost（可超上限）
 	var state2 := _make_state()
 	state2.debug_force_plays = 0
 	state2.hand.clear()
 	state2.hand.append(CardDB.get_card("surge"))
 	check(state2.discard_for_cost(0) == 0, "弃蓄流 +0 Cost")
-	check(state2.player_cost == BattleConfig.PLAYER_MAX_COST + 3, "获得 Cost +3（15/12）")
-	# 坚壁：弃掉 → 获得 3 点格挡，挡下本回合敌人 2 点
+	check(state2.player_cost == BattleConfig.PLAYER_MAX_COST + 3, "获得 Cost +3（9/6）")
+	# 坚壁：弃掉 → 获得 3 点格挡，挡下本回合敌人 2 点（钉死 1 张敌牌，3 格挡正好够）
 	var state3 := _make_state()
-	state3.debug_force_plays = 2
+	state3.debug_force_plays = 1
 	state3.hand.clear()
 	state3.hand.append(CardDB.get_card("bulwark"))
 	check(state3.discard_for_cost(0) == 0, "弃坚壁 +0 Cost")
@@ -1030,7 +1076,7 @@ func test_card_stacking() -> void:
 	check(state.discard_pile.size() == 2, "弃牌堆拆回两张原牌")
 	check(state.discard_pile[0].id == "strike" and state.discard_pile[1].id == "strike", "弃牌堆里是原牌不是合成体")
 	check(_log_contains(logs, "合成「普通魔弹＋普通魔弹」"), "合成日志出现")
-	# 三张合成：费用 1+1+1+2×1=5；2+2+4=8 伤；累计 3 张攻击触发罪卡任务解锁
+	# 三张合成：费用 1+1+2+2×1=6；2+2+4=8 伤；累计 3 张攻击触发罪卡任务解锁
 	var state2 := _make_sin_state()
 	state2.debug_force_plays = 0
 	state2.hand.clear()
@@ -1041,7 +1087,7 @@ func test_card_stacking() -> void:
 	state2.merge_into_staged(0, 0)
 	check(state2.can_merge_with(state2.hand[0], 0), "强力魔弹可叠进普通魔弹＋普通魔弹（同大类）")
 	check(state2.merge_into_staged(0, 0), "三张合成")
-	check(state2.staged[0].cost == 5, "三张合成费用 = 3 张原费 + 2 次叠牌费 = 5")
+	check(state2.staged[0].cost == 6, "三张合成费用 = 1+1+2 原费 + 2 次叠牌费 = 6")
 	check(state2.staged[0].display_name == "普通魔弹＋普通魔弹＋强力魔弹", "三张牌名")
 	state2.commit_staged()
 	check(state2.enemy_hp == BattleConfig.ENEMY_MAX_HP - 8, "2+2+4=8 伤一次打出")
@@ -1062,15 +1108,15 @@ func test_card_stacking() -> void:
 		if card.id == "strike":
 			strike_count += 1
 	check(strike_count == 2 and state3.hand.size() == 3, "拆成两张普通魔弹＋普通防御回手")
-	# 5 槽满仍可叠（不新增卡槽，绕过槽上限）
+	# 槽满仍可叠（不新增卡槽，绕过槽上限）
 	var state4 := BattleState.new()
 	var deck: Array = []
 	for _i in 8:
 		deck.append("strike")
 	state4.start(deck)
-	for _i in 5:
+	for _i in BattleConfig.PLAY_ZONE_SIZE:
 		state4.stage_card(0)
-	check(state4.staged.size() == BattleConfig.PLAY_ZONE_SIZE, "五张全部摆进（槽满）")
+	check(state4.staged.size() == BattleConfig.PLAY_ZONE_SIZE, "四张摆满（槽满）")
 	state4.gain_card(CardDB.get_card("strike"))
 	check(not state4.can_stage(state4.hand[0]), "槽满后不能再摆")
 	check(state4.can_merge_with(state4.hand[0], 0), "槽满仍可叠（不新增卡槽）")
@@ -1400,8 +1446,8 @@ func test_entry_hp_modifier() -> void:
 	check(run.pending_hp_delta == -1, "疗愈抵消掉血")
 	run.apply_hp_delta(5)
 	check(run.pending_hp_delta == 0, "回血最多抵消到 0（不超满血）")
-	run.apply_hp_delta(-20)
-	check(run.pending_hp_delta == -9 and run.entry_hp() == 1, "掉血下限 −9（入场至少 1 血）")
+	run.apply_hp_delta(-30)
+	check(run.pending_hp_delta == -19 and run.entry_hp() == 1, "掉血下限 −19（入场至少 1 血）")
 	run.reset_layer()
 	check(run.pending_hp_delta == 0 and run.entry_hp() == BattleConfig.PLAYER_MAX_HP, "死亡重掷/层完成清零")
 	var state := BattleState.new()
@@ -1532,15 +1578,15 @@ func test_multi_enemy_helpers() -> void:
 	logs.clear()
 	state._apply_effect({"op": "deal_damage", "amount": 3, "target": "all", "bonus_vs": "sleeping", "bonus": 2}, "测试")
 	check(_count_log(logs, "甲受到 3 点伤害。") == 1 and _count_log(logs, "乙受到 5 点伤害。") == 1 and _count_log(logs, "丙受到 5 点伤害。") == 1, "沉睡 3＋2、未沉睡 3")
-	# 治疗封顶
-	state.player_hp = BattleConfig.PLAYER_MAX_HP
+	# 治疗封顶（教学战上限 10，用 mode 无关的 player_max_hp 取值）
+	state.player_hp = state.player_max_hp()
 	logs.clear()
 	state._apply_effect({"op": "heal", "amount": 3}, "测试")
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP and _log_contains(logs, "没有恢复的必要"), "满血治疗不溢出")
-	state.player_hp = BattleConfig.PLAYER_MAX_HP - 1
+	check(state.player_hp == state.player_max_hp() and _log_contains(logs, "没有恢复的必要"), "满血治疗不溢出")
+	state.player_hp = state.player_max_hp() - 1
 	logs.clear()
 	state._apply_effect({"op": "heal", "amount": 3}, "测试")
-	check(state.player_hp == BattleConfig.PLAYER_MAX_HP and _log_contains(logs, "你恢复了 1 点生命。（生命 10）"), "按缺口封顶恢复")
+	check(state.player_hp == state.player_max_hp() and _log_contains(logs, "你恢复了 1 点生命。（生命 10）"), "按缺口封顶恢复")
 
 
 func test_teaching_battle_logic() -> void:
@@ -1649,23 +1695,23 @@ func test_battle_scene_tutorial() -> void:
 	check(not overlay.visible, "开局不弹覆盖层（召唤告知已上移到主流程）")
 	check(not (scene.get_node("%QuitPracticeButton") as Button).visible, "教程模式不显示结束练习")
 	check(hand_box.get_child_count() == 5, "开局手牌 5 张")
-	check(play_box.get_child_count() == BattleConfig.PLAY_ZONE_SIZE, "出牌区有 5 个卡槽")
+	check(play_box.get_child_count() == BattleConfig.PLAY_ZONE_SIZE, "出牌区有 4 个卡槽")
 	check(commit_button.disabled and commit_button.text == "打出", "空出牌区时「打出」置灰")
 	check(timer_label.text == "剩余 45 秒", "开局计时 45 秒")
 	var cost_label := scene.get_node("%CostLabel") as Label
-	_check_cost_label(scene, "Cost 12 / 12", "开局 Cost 显示 12/12")
+	_check_cost_label(scene, "Cost 6 / 6", "开局 Cost 显示 6/6")
 	var first_strike := _first_live_button(hand_box, "普通魔弹")
 	check(first_strike != null, "手里有普通魔弹")
 	check(first_strike.drag_zone == "hand", "手牌处于可拖状态")
 	check(_drag_card_to(scene, first_strike, play_box), "拖手牌到出牌区")
 	check(scene.state.staged.size() == 1, "拖拽摆进出牌区")
-	_check_cost_label(scene, "Cost 11 / 12", "摆放后可用 Cost 实时下调（11/12，摆放不扣实扣）")
+	_check_cost_label(scene, "Cost 5 / 6", "摆放后可用 Cost 实时下调（5/6，摆放不扣实扣）")
 	check(commit_button.text == "打出（Cost -1）", "打出按钮预告合计 Cost")
 	var staged_button := _first_live_button(play_box, "普通魔弹")
 	check(staged_button != null, "出牌区出现已摆的牌")
 	staged_button.pressed.emit()
 	check(scene.state.staged.is_empty(), "点击已摆的牌收回")
-	_check_cost_label(scene, "Cost 12 / 12", "收回后可用 Cost 实时恢复（12/12）")
+	_check_cost_label(scene, "Cost 6 / 6", "收回后可用 Cost 实时恢复（6/6）")
 	var strike_again := _first_live_button(hand_box, "普通魔弹")
 	check(_drag_card_to(scene, strike_again, play_box), "重新拖进")
 	check(scene.state.staged.size() == 1, "重新摆进出牌区")
@@ -1684,10 +1730,10 @@ func test_battle_scene_tutorial() -> void:
 	commit_button.pressed.emit()
 	check(scene.state.enemy_hp == BattleConfig.ENEMY_MAX_HP - 2, "普通魔弹照常生效")
 	check(scene.state.staged.is_empty(), "打出后出牌区清空")
-	_check_cost_label(scene, "Cost 12 / 12", "打出即结束回合，新回合 Cost 重置满")
+	_check_cost_label(scene, "Cost 6 / 6", "打出即结束回合，新回合 Cost 重置满")
 	check(timer_label.text == "剩余 45 秒", "新回合计时重置")
-	check(scene.state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "打出后对方出了 1 张，打了 1 点")
-	check(enemy_hand_label.text == "手牌 7 张", "敌人出 1 张再摸 3 张，手牌显示 7 张")
+	check(scene.state.player_hp == BattleConfig.PLAYER_MAX_HP - 2, "打出后对方出了 1 张，打了 2 点")
+	check(enemy_hand_label.text == "手牌 8 张", "敌人出 1 张再摸 4 张，手牌显示 8 张")
 	check(commit_button.disabled and commit_button.text == "打出", "新回合打出按钮回到初始态")
 	check(not end_turn_button.disabled, "新回合结束回合按钮可用")
 	var strike_next := _first_live_button(hand_box, "普通魔弹")
@@ -1741,7 +1787,7 @@ func test_battle_scene_practice() -> void:
 	check(quit_button.visible, "练习模式显示结束练习按钮")
 	check((scene.get_node("%EnemyNameLabel") as Label).text == "木桩", "对手显示木桩")
 	check((scene.get_node("%EnemyHpLabel") as Label).text == "生命 %d / %d" % [BattleConfig.PRACTICE_ENEMY_HP, BattleConfig.PRACTICE_ENEMY_HP], "血量按木桩显示")
-	_check_cost_label(scene, "Cost 12 / 12", "练习模式也是同一套 Cost")
+	_check_cost_label(scene, "Cost 6 / 6", "练习模式也是同一套 Cost")
 	var hp_before: int = scene.state.player_hp
 	scene.state.end_turn()
 	check(scene.state.player_hp == hp_before, "木桩不还手")
@@ -2078,8 +2124,8 @@ func test_event_effect_flow() -> void:
 	check(battle_host.get_child_count() == 1, "进入战斗位")
 	var battle: Variant = battle_host.get_child(0)
 	check(battle.state.enemy_name == "糖丝傀儡", "第二列作战按节点")
-	check(battle.state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "带伤入场（你：9 / 10）")
-	check((battle.get_node("%PlayerHpLabel") as Label).text == "你：9 / 10", "入战 HUD 显示带伤入场")
+	check(battle.state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "带伤入场（你：19 / 20）")
+	check((battle.get_node("%PlayerHpLabel") as Label).text == "你：19 / 20", "入战 HUD 显示带伤入场")
 	viewport.queue_free()
 	await process_frame
 
@@ -2179,7 +2225,7 @@ func test_scene_drag_and_discard() -> void:
 	# 本测试只验拖拽/悬停 UI：钉死罪卡为本场检定对象并解锁，不混入封印逻辑
 	scene.state.deck_sin_id = "wrath"
 	scene.state.sin_available = true
-	_check_cost_label(scene, "Cost 12 / 12", "弃牌前 Cost 12 / 12")
+	_check_cost_label(scene, "Cost 6 / 6", "弃牌前 Cost 6 / 6")
 	var wrath_button := _first_live_button(hand_box, "懒惰")
 	check(wrath_button != null, "手里出现懒惰")
 	# 悬停反馈：模拟拖拽开始状态（与引擎通知同路径），检查高亮与弃牌收益预告
@@ -2200,19 +2246,19 @@ func test_scene_drag_and_discard() -> void:
 	scene._notification(Control.NOTIFICATION_DRAG_END)
 	check((discard_zone.get_theme_stylebox("panel") as StyleBoxFlat).border_color == discard_base_border and (play_panel.get_theme_stylebox("panel") as StyleBoxFlat).border_color == play_base_border, "拖拽结束高亮复位")
 	check(_drag_card_to(scene, wrath_button, discard_zone), "拖懒惰到弃牌区")
-	_check_cost_label(scene, "Cost 17 / 12", "弃 6 费牌 +5，Cost 超上限（17/12）")
+	_check_cost_label(scene, "Cost 11 / 6", "弃 6 费牌 +5，Cost 超上限（11/6）")
 	check(discard_zone_label.text.contains("+5"), "弃牌区显示本回合已获得 +5")
 	check(_find_card(scene.state.discard_pile, "wrath") >= 0, "弃掉的懒惰进弃牌堆")
 	var strike_to_discard := _first_live_button(hand_box, "普通魔弹")
 	check(_drag_card_to(scene, strike_to_discard, discard_zone), "1 费牌也能拖去弃掉")
-	_check_cost_label(scene, "Cost 17 / 12", "1 费牌弃掉 +0，Cost 不变")
+	_check_cost_label(scene, "Cost 11 / 6", "1 费牌弃掉 +0，Cost 不变")
 	var play_strike2 := _first_live_button(hand_box, "普通魔弹")
 	check(_drag_card_to(scene, play_strike2, play_box), "摆一张普通魔弹准备打出")
 	scene.state.debug_force_plays = 0
 	(scene.get_node("%CommitButton") as Button).pressed.emit()
 	check(scene.state.staged.is_empty(), "打出后出牌区清空")
 	check(scene.state.phase == BattleState.Phase.PLAYER, "打出即结束回合，回到新回合")
-	_check_cost_label(scene, "Cost 12 / 12", "新回合 Cost 重置回 12 / 12")
+	_check_cost_label(scene, "Cost 6 / 6", "新回合 Cost 重置回 6 / 6")
 	check(discard_zone_label.text.contains("+0"), "弃牌区回合计数归零")
 	var strike_after_commit := _first_live_button(hand_box, "普通魔弹")
 	check(strike_after_commit != null, "新回合手里仍有普通魔弹")
@@ -2240,7 +2286,7 @@ func test_scene_stacking() -> void:
 	# 拖叠：两张普通魔弹合成一张（费用 3）
 	var strike_a := _first_live_button(hand_box, "普通魔弹")
 	check(_drag_card_to(scene, strike_a, play_box), "摆第一张普通魔弹")
-	_check_cost_label(scene, "Cost 11 / 12", "摆放后可用 Cost 11/12")
+	_check_cost_label(scene, "Cost 5 / 6", "摆放后可用 Cost 5/6")
 	await process_frame  # 等容器重排完成，新卡牌 rect 才可命中
 	var strike_b := _first_live_button(hand_box, "普通魔弹")
 	check(strike_b != null, "手里还有第二张普通魔弹")
@@ -2253,14 +2299,14 @@ func test_scene_stacking() -> void:
 	check(scene.state.staged.size() == 1, "合成为一张，占同一卡槽")
 	check(scene.state.staged[0].display_name == "普通魔弹＋普通魔弹" and scene.state.staged[0].cost == 3, "合成牌 普通魔弹＋普通魔弹，费用 3")
 	check(_count_live_card_buttons(hand_box) == 3, "手牌消耗一张（5→4→3）")
-	_check_cost_label(scene, "Cost 9 / 12", "合成后出牌区合计 3，可用 Cost 9/12")
+	_check_cost_label(scene, "Cost 3 / 6", "合成后出牌区合计 3，可用 Cost 3/6")
 	var merged_button := _first_live_button(play_box, "普通魔弹＋普通魔弹")
 	check(merged_button != null, "出牌区显示合成牌")
 	# 拖回拆开：两张原牌回手，费用不花
 	check(_drag_card_to(scene, merged_button, hand_box), "拖回手牌区")
 	check(scene.state.staged.is_empty(), "出牌区清空")
 	check(_count_live_card_buttons(hand_box) == 5, "拆开回手两张，手牌回到 5")
-	_check_cost_label(scene, "Cost 12 / 12", "拆开后 Cost 复原 12/12")
+	_check_cost_label(scene, "Cost 6 / 6", "拆开后 Cost 复原 6/6")
 	# 增幅牌：灰显、不可摆、拖拽悬停出现触发预告
 	var quench_button := _first_live_button(hand_box, "灼印")
 	check(quench_button != null and quench_button.modulate.r < 1.0, "增幅牌灰显（不可摆放）")
@@ -2269,16 +2315,16 @@ func test_scene_stacking() -> void:
 	var discard_point: Vector2 = scene.get_global_transform().affine_inverse() * discard_zone.get_global_rect().get_center()
 	check(scene._can_drop_data(discard_point, quench_data), "增幅牌只能投弃牌区")
 	check(scene._drag_target_now == "discard", "悬停目标为弃牌区")
-	check(discard_zone_label.text.contains("弃掉「灼印」") and discard_zone_label.text.contains("本回合伤害 +2"), "弃牌预告显示触发效果")
+	check(discard_zone_label.text.contains("弃掉「灼印」") and discard_zone_label.text.contains("本回合伤害 +3"), "弃牌预告显示触发效果")
 	scene._drop_data(discard_point, quench_data)
-	check(scene.state.turn_attack_bonus == 2, "弃掉灼印，本回合伤害 +2")
-	check(block_label.text.contains("本回合攻击 +2"), "状态行显示本回合加成")
+	check(scene.state.turn_attack_bonus == 3, "弃掉灼印，本回合伤害 +3")
+	check(block_label.text.contains("本回合攻击 +3"), "状态行显示本回合加成")
 	check(_find_card(scene.state.discard_pile, "quench") >= 0, "灼印进弃牌堆")
 	# 加成在打出时生效（2+2=4），下一回合回归
 	var strike_c := _first_live_button(hand_box, "普通魔弹")
 	check(_drag_card_to(scene, strike_c, play_box), "摆一张普通魔弹吃加成")
 	(scene.get_node("%CommitButton") as Button).pressed.emit()
-	check(scene.state.enemy_hp == BattleConfig.PRACTICE_ENEMY_HP - 4, "普通魔弹 2+2=4 伤（木桩 48→44）")
+	check(scene.state.enemy_hp == BattleConfig.PRACTICE_ENEMY_HP - 5, "普通魔弹 2+3=5 伤（木桩 60→55）")
 	check(scene.state.turn_attack_bonus == 0, "新回合加成归零")
 	check(not block_label.text.contains("本回合攻击"), "状态行加成收起")
 	viewport.queue_free()
@@ -2326,7 +2372,7 @@ func test_engine_drag_input() -> void:
 	check(scene._drag_zone_source == "" and scene._drag_target_now == "", "松手后拖拽状态清空")
 	check((play_panel.get_theme_stylebox("panel") as StyleBoxFlat).border_color == play_base_border, "松手后高亮复位")
 	check(scene.state.staged.size() == 1, "真实拖拽把牌放进了出牌区")
-	_check_cost_label(scene, "Cost 11 / 12", "引擎级拖拽摆放后左上角可用 Cost 实时下调（11/12）")
+	_check_cost_label(scene, "Cost 5 / 6", "引擎级拖拽摆放后左上角可用 Cost 实时下调（5/6）")
 	if scene.state.staged.size() == 1:
 		check(scene.state.staged[0].id == "strike", "放进去的正是被拖的普通魔弹")
 	check(_count_live_card_buttons(hand_box) == 4, "手牌跟着少一张")
@@ -2342,7 +2388,7 @@ func test_engine_drag_input() -> void:
 		check(scene._drag_target_now == "hand", "引擎拖拽悬停手牌区（可撤回）")
 		_push_mouse_button(viewport, back_to, false)
 		check(scene.state.staged.is_empty(), "拖回后出牌区清空")
-		_check_cost_label(scene, "Cost 12 / 12", "引擎级拖回后左上角可用 Cost 实时恢复（12/12）")
+		_check_cost_label(scene, "Cost 6 / 6", "引擎级拖回后左上角可用 Cost 实时恢复（6/6）")
 		check(_count_live_card_buttons(hand_box) == 5, "手牌恢复五张")
 	# 弃牌区同样走引擎级真实拖拽（PanelContainer 默认 STOP 会静默拦截投放，2026-10-03 修复）
 	scene.state.gain_card(CardDB.get_card("wrath"))
@@ -2357,7 +2403,7 @@ func test_engine_drag_input() -> void:
 		_push_mouse_motion(viewport, discard_to)
 		check(scene._drag_target_now == "discard", "引擎拖拽悬停弃牌区")
 		_push_mouse_button(viewport, discard_to, false)
-		_check_cost_label(scene, "Cost 17 / 12", "引擎级拖拽弃牌 +5（17/12）")
+		_check_cost_label(scene, "Cost 11 / 6", "引擎级拖拽弃牌 +5（11/6）")
 		check(_find_card(scene.state.discard_pile, "wrath") >= 0, "懒惰经引擎拖拽进了弃牌堆")
 	# 手牌拖出后在非弃牌区松手（例：日志区）＝自动摆进出牌区（日志区控件必须 IGNORE，否则引擎拖放被静默拦截）
 	var strike_free := _first_live_button(hand_box, "普通魔弹")
@@ -2390,7 +2436,7 @@ func test_engine_drag_input() -> void:
 			check(scene.state.staged.size() == 1, "合成后仍占一个卡槽")
 			check(scene.state.staged[0].is_merged() and scene.state.staged[0].cost == 3, "引擎拖叠合成，费用 3（1+1+叠费）")
 			check(_count_live_card_buttons(hand_box) == 3, "合成消耗一张手牌")
-			_check_cost_label(scene, "Cost 14 / 12", "合成后出牌区 3，可用 Cost 14（17-3）")
+			_check_cost_label(scene, "Cost 8 / 6", "合成后出牌区 3，可用 Cost 8（11-3）")
 	viewport.queue_free()
 	await process_frame
 
@@ -2449,7 +2495,7 @@ func test_scene_hover_scale() -> void:
 
 
 func test_scene_fan_hand_geometry() -> void:
-	print("[扇形手牌：8 张上限内完整排开；超限窗口仍全可见；拖拽不破坏]")
+	print("[扇形手牌：7 张上限内完整排开；超限窗口仍全可见；拖拽不破坏]")
 	var packed := load("res://scenes/battle.tscn") as PackedScene
 	if packed == null:
 		return
@@ -2466,14 +2512,14 @@ func test_scene_fan_hand_geometry() -> void:
 	for i in range(1, opening.size()):
 		if not is_equal_approx(opening[i].position.x - opening[i - 1].position.x, 118.0):
 			no_overlap = false
-	check(no_overlap, "≤8 张不叠压：相邻步进 118")
-	for _i in 3:
+	check(no_overlap, "≤7 张不叠压：相邻步进 118")
+	for _i in 2:
 		scene.state.gain_card(CardDB.get_card("strike"))
 	await process_frame
 	await process_frame
 	var scroll_rect: Rect2 = hand_scroll.get_global_rect()
 	var full := _live_hand_cards(hand_box)
-	check(full.size() == 8, "8 张到上限，牌面全部生成")
+	check(full.size() == 7, "7 张到上限，牌面全部生成")
 	var full_step := true
 	var full_inside := true
 	for i in full.size():
@@ -2483,10 +2529,10 @@ func test_scene_fan_hand_geometry() -> void:
 		if full_rect.position.x < scroll_rect.position.x - 0.5 or full_rect.end.x > scroll_rect.end.x + 0.5 \
 				or full_rect.position.y < scroll_rect.position.y - 0.5 or full_rect.end.y > scroll_rect.end.y + 0.5:
 			full_inside = false
-	check(full_step, "上限内 8 张仍不叠压（步进 118）")
-	check(full_inside, "8 张全部含于手牌区内")
+	check(full_step, "上限内 7 张仍不叠压（步进 118）")
+	check(full_inside, "7 张全部含于手牌区内")
 	# 上限内无强制弃牌页遮挡：走引擎级真实拖拽（最右卡）
-	var rightmost: CardButton = full[7]
+	var rightmost: CardButton = full[6]
 	var from_point: Vector2 = rightmost.get_global_rect().get_center()
 	var to_point: Vector2 = play_box.get_global_rect().get_center()
 	_push_mouse_button(viewport, from_point, true)
@@ -2498,7 +2544,7 @@ func test_scene_fan_hand_geometry() -> void:
 	await process_frame
 	await process_frame
 	var after := _live_hand_cards(hand_box)
-	check(after.size() == 7, "拖走一张后剩 7 张")
+	check(after.size() == 6, "拖走一张后剩 6 张")
 	# 第二张走数据链直接投放（与应用级路径同源）
 	var leftmost: CardButton = after[0]
 	check(_drag_card_to(scene, leftmost, play_box), "第二张拖拽数据链完好")
@@ -2506,7 +2552,7 @@ func test_scene_fan_hand_geometry() -> void:
 	await process_frame
 	await process_frame
 	var rest := _live_hand_cards(hand_box)
-	check(rest.size() == 6, "收走两张后剩 6 张")
+	check(rest.size() == 5, "收走两张后剩 5 张")
 	var rest_step_ok := true
 	var rest_inside := true
 	for i in rest.size():
@@ -2515,16 +2561,16 @@ func test_scene_fan_hand_geometry() -> void:
 		var rest_rect: Rect2 = rest[i].get_global_rect()
 		if rest_rect.position.x < scroll_rect.position.x - 0.5 or rest_rect.end.x > scroll_rect.end.x + 0.5:
 			rest_inside = false
-	check(rest_step_ok, "6 张重排后步进仍 118")
+	check(rest_step_ok, "5 张重排后步进仍 118")
 	check(rest_inside, "重排后仍全部在手牌区内")
-	# 超限窗口（9–11 张）：临时叠压、全部可见（此时强制弃牌页在场，弃牌走弃牌页）
+	# 超限窗口（10 张）：临时叠压、全部可见（此时强制弃牌页在场，弃牌走弃牌页）
 	for _i in 5:
 		scene.state.gain_card(CardDB.get_card("strike"))
 	await process_frame
 	await process_frame
 	var over := _live_hand_cards(hand_box)
-	check(over.size() == 11, "超限窗口 11 张牌面全部生成")
-	var expected_step: float = (hand_box.size.x - 20.0 - 118.0) / 10.0
+	check(over.size() == 10, "超限窗口 10 张牌面全部生成")
+	var expected_step: float = (hand_box.size.x - 20.0 - 118.0) / 9.0
 	var monotonic := true
 	var even := true
 	var inside := true
@@ -2539,9 +2585,9 @@ func test_scene_fan_hand_geometry() -> void:
 		if over_rect.position.x < scroll_rect.position.x - 0.5 or over_rect.end.x > scroll_rect.end.x + 0.5 \
 				or over_rect.position.y < scroll_rect.position.y - 0.5 or over_rect.end.y > scroll_rect.end.y + 0.5:
 			inside = false
-	check(monotonic, "11 张从左到右递增")
-	check(even, "11 张均等步进叠压（约 %.1f px）" % expected_step)
-	check(inside, "11 张全部含于手牌区内")
+	check(monotonic, "10 张从左到右递增")
+	check(even, "10 张均等步进叠压（约 %.1f px）" % expected_step)
+	check(inside, "10 张全部含于手牌区内")
 	viewport.queue_free()
 	await process_frame
 
@@ -2562,13 +2608,13 @@ func test_scene_pile_counts() -> void:
 	var hand_box := scene.get_node("%HandBox") as Control
 	var discard_zone := scene.get_node("%DiscardZone") as PanelContainer
 	var play_box := scene.get_node("%PlayBox") as HBoxContainer
-	check(hand_count.text == "手牌 5/8", "开局：手牌 5/8")
+	check(hand_count.text == "手牌 5/7", "开局：手牌 5/7")
 	check(pile_count.text == "牌堆 3　弃牌堆 0", "开局：牌堆 3、弃牌堆 0")
 	scene.state.debug_force_plays = 0
 	var to_discard: CardButton = _live_hand_cards(hand_box)[0]
 	check(_drag_card_to(scene, to_discard, discard_zone), "拖一张进弃牌区换 Cost")
 	await process_frame
-	check(hand_count.text == "手牌 4/8", "弃牌后手牌 4/8")
+	check(hand_count.text == "手牌 4/7", "弃牌后手牌 4/7")
 	check(pile_count.text == "牌堆 3　弃牌堆 1", "弃牌后：牌堆 3、弃牌堆 1")
 	var strike_button := _first_live_button(hand_box, "普通魔弹")
 	check(strike_button != null, "手里还有普通魔弹")
@@ -2576,15 +2622,15 @@ func test_scene_pile_counts() -> void:
 		check(_drag_card_to(scene, strike_button, play_box), "摆一张普通魔弹")
 		(scene.get_node("%CommitButton") as Button).pressed.emit()
 		await process_frame
-		check(pile_count.text == "牌堆 0　弃牌堆 2", "打出并摸 3 张后：牌堆 0、弃牌堆 2（打出的牌入弃牌堆）")
+		check(pile_count.text == "牌堆 1　弃牌堆 0", "打出并摸 4 张后：牌堆 1、弃牌堆 0（弃牌堆洗回补足摸牌）")
 	var victim: CardButton = _live_hand_cards(hand_box)[0]
 	check(_drag_card_to(scene, victim, discard_zone), "再弃一张")
 	await process_frame
-	check(pile_count.text == "牌堆 0　弃牌堆 3", "弃牌后：牌堆 0、弃牌堆 3")
+	check(pile_count.text == "牌堆 1　弃牌堆 1", "弃牌后：牌堆 1、弃牌堆 1")
 	var hand_before: int = scene.state.hand.size()
 	(scene.get_node("%EndTurnButton") as Button).pressed.emit()
 	await process_frame
-	check(scene.state.hand.size() == hand_before + 3, "空过一轮照常摸 3 张（弃牌堆洗回）")
+	check(scene.state.hand.size() == hand_before + 2, "空过一轮摸 2 张（弃牌堆洗回补足）")
 	check(pile_count.text == "牌堆 0　弃牌堆 0", "洗回后摸完：牌堆 0、弃牌堆 0")
 	check(pile_count.text == "牌堆 %d　弃牌堆 %d" % [scene.state.draw_pile.size(), scene.state.discard_pile.size()], "显示与 state 完全一致")
 	viewport.queue_free()
@@ -2592,7 +2638,7 @@ func test_scene_pile_counts() -> void:
 
 
 func test_scene_forced_discard() -> void:
-	print("[手牌上限 8：超限强制弹出弃牌页]")
+	print("[手牌上限 7：超限强制弹出弃牌页]")
 	var packed := load("res://scenes/battle.tscn") as PackedScene
 	if packed == null:
 		return
@@ -2606,28 +2652,28 @@ func test_scene_forced_discard() -> void:
 	var hand_count := scene.get_node("%HandCountLabel") as Label
 	var pile_count := scene.get_node("%PileCountLabel") as Label
 	check(not overlay.visible, "未超限时不弹弃牌页")
-	check(hand_count.text == "手牌 5/8", "开局计数 5/8")
+	check(hand_count.text == "手牌 5/7", "开局计数 5/7")
 	check(not hand_count.has_theme_color_override("font_color"), "未满上限不标警示色")
-	check(pile_count.text == "牌堆 3　弃牌堆 0", "开局牌堆/弃牌堆 3 / 0")
-	for _i in 3:
+	check(pile_count.text == "牌堆 5　弃牌堆 0", "开局牌堆/弃牌堆 5 / 0")
+	for _i in 2:
 		scene.state.gain_card(CardDB.get_card("strike"))
-	check(scene.state.hand.size() == BattleConfig.HAND_LIMIT, "手牌到 8 张")
-	check(hand_count.text == "手牌 8/8", "到上限计数 8/8")
+	check(scene.state.hand.size() == BattleConfig.HAND_LIMIT, "手牌到上限 7 张")
+	check(hand_count.text == "手牌 7/7", "到上限计数 7/7")
 	check(hand_count.has_theme_color_override("font_color"), "到上限计数变警示色")
 	check(not overlay.visible, "到上限还不够，不弹")
 	scene.state.gain_card(CardDB.get_card("strike"))
-	check(scene.state.hand.size() == 9, "第 9 张超出上限")
-	check(hand_count.text == "手牌 9/8", "超限计数 9/8")
+	check(scene.state.hand.size() == 8, "第 8 张超出上限")
+	check(hand_count.text == "手牌 8/7", "超限计数 8/7")
 	check(overlay.visible and discard_scroll.visible, "强制弹出弃牌页")
 	check(story.text.contains("还差 1 张"), "提示还差 1 张")
-	check(discard_box.get_child_count() == 9, "列出全部 9 张手牌")
+	check(discard_box.get_child_count() == 8, "列出全部 8 张手牌")
 	var first_discard := discard_box.get_child(0) as Button
 	first_discard.pressed.emit()
 	check(scene.state.hand.size() == BattleConfig.HAND_LIMIT, "弃掉 1 张后回到上限")
-	check(hand_count.text == "手牌 8/8", "弃回后计数 8/8")
+	check(hand_count.text == "手牌 7/7", "弃回后计数 7/7")
 	check(not overlay.visible, "弃牌页自动关闭")
 	check(scene.state.discard_pile.size() == 1, "弃掉的牌进了弃牌堆")
-	check(pile_count.text == "牌堆 3　弃牌堆 1", "弃牌堆计数 3 / 1")
+	check(pile_count.text == "牌堆 5　弃牌堆 1", "弃牌堆计数 5 / 1")
 	viewport.queue_free()
 	await process_frame
 
@@ -2748,14 +2794,18 @@ func test_main_flow_full() -> void:
 		check(heavy_button != null, "第 %d 张强力魔弹按钮在场" % (i + 1))
 		if heavy_button != null:
 			heavy_button.pressed.emit()
-	for i in 2:
+	for i in 3:
 		var guard_button := _first_live_button(warehouse, "「普通防御」")
 		check(guard_button != null, "第 %d 张普通防御按钮在场" % (i + 1))
 		if guard_button != null:
 			guard_button.pressed.emit()
+	var heal_button := _first_live_button(warehouse, "「治疗术」")
+	check(heal_button != null, "治疗术按钮在场")
+	if heal_button != null:
+		heal_button.pressed.emit()
 	var start_button := main.get_node("%StartPracticeButton") as Button
-	check((main.get_node("%DeckCountLabel") as Label).text == "卡组 8 / 8", "卡组计数更新（4 魔弹＋2 强弹＋2 防御）")
-	check(not start_button.disabled, "8 张组好后可开打")
+	check((main.get_node("%DeckCountLabel") as Label).text == "卡组 10 / 10", "卡组计数更新（4 魔弹＋2 强弹＋3 防御＋1 治疗）")
+	check(not start_button.disabled, "10 张组好后可开打")
 	start_button.pressed.emit()
 	check(battle_host.get_child_count() == 1, "练习战进入战斗位")
 	var practice_battle: Variant = battle_host.get_child(0)
@@ -2779,8 +2829,8 @@ func test_main_flow_full() -> void:
 	var battle2: Variant = battle_host.get_child(0)
 	check(battle2.state.mode == BattleState.Mode.TUTORIAL, "是教程模式")
 	check(battle2.state.enemy_name == "贝尔芬格", "对手是贝尔芬格")
-	_check_cost_label(battle2, "Cost 12 / 12", "教程战恢复 Cost 12 体系")
-	check(battle2.state.draw_pile.size() + battle2.state.hand.size() == BattleConfig.DECK_SIZE, "教程战用练习站自组的 8 张卡组")
+	_check_cost_label(battle2, "Cost 6 / 6", "教程战恢复 Cost 6 体系")
+	check(battle2.state.draw_pile.size() + battle2.state.hand.size() == BattleConfig.DECK_SIZE, "教程战用练习站自组的 10 张卡组")
 	battle2.state.debug_force_plays = 0
 	await process_frame
 	_press_strikes_until_over(battle2)
@@ -3047,11 +3097,14 @@ func test_confirm_deck_flow() -> void:
 		var heavy_button := _first_live_button(warehouse, "「强力魔弹」")
 		if heavy_button != null:
 			heavy_button.pressed.emit()
-	for i in 2:
+	for i in 3:
 		var guard_button := _first_live_button(warehouse, "「普通防御」")
 		if guard_button != null:
 			guard_button.pressed.emit()
-	check((main.get_node("%DeckCountLabel") as Label).text == "卡组 8 / 8", "组卡生效（8/8）")
+	var heal_button := _first_live_button(warehouse, "「治疗术」")
+	if heal_button != null:
+		heal_button.pressed.emit()
+	check((main.get_node("%DeckCountLabel") as Label).text == "卡组 10 / 10", "组卡生效（10/10）")
 	check(main.run.chosen.is_empty() and main.run.column_index == 0, "组卡期间选择仍未落账")
 	# 离开 → 回地图并重新弹出同节点确认窗
 	(main.get_node("%LeavePracticeButton") as Button).pressed.emit()
@@ -3067,7 +3120,7 @@ func test_confirm_deck_flow() -> void:
 	check(battle_host.get_child_count() == 1, "进入战斗位")
 	var battle: Variant = battle_host.get_child(0)
 	check(battle.state.enemy_name == "粉雾歌者", "按节点配置对手")
-	check(battle.state.draw_pile.size() + battle.state.hand.size() == BattleConfig.DECK_SIZE, "用组卡界面组的 8 张卡组")
+	check(battle.state.draw_pile.size() + battle.state.hand.size() == BattleConfig.DECK_SIZE, "用组卡界面组的 10 张卡组")
 	viewport.queue_free()
 	await process_frame
 

@@ -6,31 +6,33 @@ extends RefCounted
 # 双名制：初幕白发少女＝菲戈蕾（人身）；被懒惰之力彻底污染后＝贝尔芬格（战斗形态）；净化后恢复菲戈蕾同行。
 # 读白使用全角标点。告知边界：净化前的所有文本只说「打倒／清空血量」，不解释「怎么救」。
 
-const PLAYER_MAX_HP := 10
-const PLAYER_MAX_COST := 12
-# 层主战为短局：玩家打贝尔芬格时手里还没有罪卡（收下发生在战斗之后），8 回合保底的拉长无意义
+const PLAYER_MAX_HP := 20
+const PLAYER_MAX_COST := 6
+# 层主战为短局：玩家打贝尔芬格时手里还没有罪卡（收下发生在战斗之后），5 回合保底的拉长无意义
+# 2026-10-07 数值紧缩制（design/design-round9.md）：此 HP 裁决保持 16 不加长
 const ENEMY_MAX_HP := 16
 const ENEMY_NAME := "贝尔芬格"
 const HAND_SIZE := 5
-const HAND_LIMIT := 8
-const PLAY_ZONE_SIZE := 5
+# 紧缩制：上限 7——单回合出牌 ≤1 张时触发强制弃牌（满出牌回合不触发）；教学战不参与，见 TEACHING_HAND_LIMIT
+const HAND_LIMIT := 7
+const PLAY_ZONE_SIZE := 4
 const TURN_TIME_LIMIT := 45.0
-const DECK_SIZE := 8
-# 默认卡组（组卡缺省回退用）：红攻×5＋蓝防×2＋金功能×1
+const DECK_SIZE := 10
+# 默认卡组（组卡缺省回退用）：红攻×6＋蓝防×3＋金功能×1
 const DECK_COMPOSITION := {
-	"strike": 4,
-	"heavy_strike": 1,
-	"guard": 2,
-	"heal": 1,
-}
-# 仓库初始卡池（20 张）：四色体系（红攻／蓝防／金功能／紫核心）＋增幅类，总量 > 卡组 8，组卡为真取舍
-const WAREHOUSE_INITIAL := {
 	"strike": 4,
 	"heavy_strike": 2,
 	"guard": 3,
+	"heal": 1,
+}
+# 仓库初始卡池（24 张）：四色体系（红攻／蓝防／金功能／紫核心）＋增幅类，总量 > 卡组 10，组卡为真取舍
+const WAREHOUSE_INITIAL := {
+	"strike": 5,
+	"heavy_strike": 3,
+	"guard": 4,
 	"strong_guard": 2,
 	"call": 2,
-	"shift": 1,
+	"shift": 2,
 	"heal": 1,
 	"cleanse": 1,
 	"greed_shot": 1,
@@ -40,20 +42,27 @@ const WAREHOUSE_INITIAL := {
 }
 # 堆叠：把一张牌叠到出牌区同类已摆牌上，合成牌费用＝各原牌费用之和＋每多一张收 STACK_FEE
 const STACK_FEE := 1
-# 一轮结束（玩家回合＋敌人回合都结束）后，双方各从各自牌组摸三张；供给不足时能摸几张是几张
-const ROUND_GAIN := 3
+# 一轮结束（玩家回合＋敌人回合都结束）后，双方各从各自牌组摸四张；供给不足时能摸几张是几张
+const ROUND_GAIN := 4
+# 敌方每回合出牌封顶（紧缩制：玩家承伤期望 = 2 张 × 2 伤；验收「层主战 5–6 回合 / 单回合承伤 4 点」）
+const ENEMY_MAX_PLAYS_PER_TURN := 2
 const ENEMY_DECK_COMPOSITION := {
 	"enemy_strike": 8,
 }
 
 const PRACTICE_ENEMY_NAME := "木桩"
-const PRACTICE_ENEMY_HP := 48
+const PRACTICE_ENEMY_HP := 60
 
 # —— 蜗牛教学战（小组脚本新手教程段）——
-# 单位制仅此一战：魔力总量 4；教学牌组钉死（不洗牌）；过完教学战恢复 Cost 12 体系
+# 单位制仅此一战：魔力总量 4；教学牌组钉死（不洗牌）；过完教学战恢复 Cost 6 体系
+# 教学战不参与紧缩制：摸牌/手牌上限沿用旧值（3/8），保证 8 张钉死牌序的水位与演出节拍不变
 const TEACHING_MAX_COST := 4
+# 摔伤 8／上限 10：教学战治疗回满 10，演出节拍不随常规 20 体系统一（design-round9.md）
 const TEACHING_PLAYER_HP := 8
+const TEACHING_PLAYER_MAX_HP := 10
 const TEACHING_TURN_TIME_LIMIT := 90.0
+const TEACHING_ROUND_GAIN := 3
+const TEACHING_HAND_LIMIT := 8
 # 波 1 五血＝两发魔弹打剩一口气，让它有机会照脚本出手一次（防御卡正好挡下）
 const TEACHING_WAVES := [
 	{"name": "蜗牛怪物", "hp": 5},
@@ -72,7 +81,7 @@ const TEACHING_SLEEP_DELAY := 2
 # 任务/保底参数按卡配置（design/design-round3.md §6：按牌组中的罪卡逐卡检定；
 # gluttony–anger 为 design-round8 先行版数值，待罪卡专轮替换）
 const SIN_CARD_ID := "wrath"
-const SIN_ROUND_FALLBACK := 8
+const SIN_ROUND_FALLBACK := 5
 const SIN_TASK_ATTACK := "attack_plays"
 const SIN_TASK_CONFIG := {
 	"wrath": {"task": SIN_TASK_ATTACK, "count": 3},
@@ -111,7 +120,7 @@ const TEXT_CLEANSE := "净化生效了。本场战斗中，负面状态不会再
 const TEXT_TEACH := [
 	"蜗牛群安静了下去。莉维娅的声音重新从水晶里浮出来：「基础的战斗方式，你已经会了。」",
 	"「还差一点手感——前面不远有一处练习站。在那儿重新配一副卡组，打到顺手为止。」",
-	"「里面的牌都归你，挑八张。接下来的战斗里，魔力会放开到十二个单位。」",
+	"「里面的牌都归你，挑十张。接下来的战斗里，魔力会放开到六个单位。」",
 	"「准备好了，就顺着森林往深处走——菲戈蕾还在等着我们。」",
 ]
 

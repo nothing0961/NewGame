@@ -7,11 +7,11 @@ script = ExtResource("1_card")
 id = "strong_guard"
 display_name = "坚固防御"
 kind = 1
-cost = 1
-text = "挡下 3 点伤害。"
+cost = 2
+text = "挡下 5 点伤害。"
 flavor = "你站在原地。这一次，不躲。"
 permanent = false
 effects = Array[Dictionary]([{
 "op": "gain_block",
-"amount": 3
+"amount": 5
 }])
