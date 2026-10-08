@@ -23,6 +23,9 @@ var route: Array = []
 var route_layer := -1
 # 层内续航修正（design-round8）：事件选项合入；掉血为负、回血抵消至多 0
 var pending_hp_delta := 0
+# 下一战轻增益（design-round10 §4）：事件得、story 开局消费；教学/练习/教程战不消耗；上限见 BattleConfig.PREP_*
+var pending_block := 0
+var pending_draw := 0
 
 
 func _init() -> void:
@@ -78,8 +81,10 @@ func reset_layer() -> void:
 	# 死亡重掷：路线缓存失效，下次读取时重新生成（design-round4.md §3）
 	route = []
 	route_layer = -1
-	# 层开始（complete_layer 内）/死亡重掷/层完成共用此入口：入场 HP 修正统一清零
+	# 层开始（complete_layer 内）/死亡重掷/层完成共用此入口：入场 HP 修正与轻增益统一清零
 	pending_hp_delta = 0
+	pending_block = 0
+	pending_draw = 0
 
 
 # 事件效果合入层内续航修正：clamp 到 [1 - PLAYER_MAX_HP, 0]（入场 HP 至少留 1）
@@ -89,6 +94,27 @@ func apply_hp_delta(delta: int) -> void:
 
 func entry_hp() -> int:
 	return BattleConfig.PLAYER_MAX_HP + pending_hp_delta
+
+
+# 事件结果统一入口（design-round10 §4）：hp 走层内续航；block/draw 累加并按上限 clamp
+func apply_outcome(outcome: Dictionary) -> void:
+	apply_hp_delta(int(outcome.get("hp", 0)))
+	pending_block = clampi(pending_block + int(outcome.get("block", 0)), 0, BattleConfig.PREP_BLOCK_CAP)
+	pending_draw = clampi(pending_draw + int(outcome.get("draw", 0)), 0, BattleConfig.PREP_DRAW_CAP)
+
+
+func entry_block() -> int:
+	return pending_block
+
+
+func entry_draw() -> int:
+	return pending_draw
+
+
+# story 开战的消费点（main_flow 在战斗子节点入场后调用；教学/练习/教程战不调用）
+func consume_buffs() -> void:
+	pending_block = 0
+	pending_draw = 0
 
 
 # 层内路线打完 → 上行；超过 MAX_LAYER 后停在 MAX_LAYER + 1（demo 边界）

@@ -1,18 +1,20 @@
 class_name EventPage
 extends Control
 
-# 事件页＝容器（design/design-round3.md §4）：标题＋场景说明＋玩法区（宿主，可注入小玩法模块）＋完成按钮。
-# 现为最小三选一交互（选一个→就地反馈→可完成）；选项附轻量效果（design-round8，由 main_flow 经 choice_chosen 结算）。
+# 事件页＝容器（design/design-round3.md §4）：标题＋场景说明＋玩法区（宿主，注入小玩法模块）＋完成按钮。
+# 玩法＝四模块拖拽小游戏（design-round10.md）：交互在 event_games/，结算走 EventGames 纯函数；
+# game_resolved 携带 outcome 交 main_flow 落账（完成按钮先发 game_resolved 再发 completed）。
 
 signal completed()
-signal choice_chosen(index: int)
+signal game_resolved(outcome: Dictionary)
 
 var _title: Label
 var _scene: Label
-var _choices_box: VBoxContainer
+var _play_box: VBoxContainer
 var _feedback: Label
 var _complete_button: Button
-var _chosen := -1
+var _panel: EventGamePanel = null
+var _pending_outcome: Dictionary = {}
 
 
 func _ready() -> void:
@@ -55,9 +57,9 @@ func _build_static_ui() -> void:
 	var play_box := VBoxContainer.new()
 	play_box.add_theme_constant_override("separation", 10)
 	play_margin.add_child(play_box)
-	_choices_box = VBoxContainer.new()
-	_choices_box.add_theme_constant_override("separation", 8)
-	play_box.add_child(_choices_box)
+	_play_box = VBoxContainer.new()
+	_play_box.add_theme_constant_override("separation", 8)
+	play_box.add_child(_play_box)
 	_feedback = Label.new()
 	_feedback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -69,37 +71,38 @@ func _build_static_ui() -> void:
 	_complete_button.custom_minimum_size = Vector2(240, 48)
 	_complete_button.disabled = true
 	_complete_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_complete_button.pressed.connect(func() -> void: completed.emit())
+	_complete_button.pressed.connect(_on_complete_pressed)
 	vbox.add_child(_complete_button)
 
 
 func show_event(stage: Dictionary) -> void:
 	_title.text = String(stage.get("title", ""))
 	_scene.text = String(stage.get("scene", ""))
-	_chosen = -1
 	_feedback.text = ""
 	_complete_button.disabled = true
-	for child in _choices_box.get_children():
-		child.hide()
-		child.queue_free()
-	var choices: Array = stage.get("choices", [])
-	var feedback: Array = stage.get("feedback", [])
-	for i in choices.size():
-		var button := Button.new()
-		button.text = "· %s" % String(choices[i])
-		button.add_theme_font_size_override("font_size", 17)
-		button.pressed.connect(_on_choice.bind(i, feedback))
-		_choices_box.add_child(button)
+	_pending_outcome = {}
+	if _panel != null and is_instance_valid(_panel):
+		_panel.hide()
+		_panel.queue_free()
+	_panel = null
+	var gp: Dictionary = stage.get("gameplay", {})
+	if gp.is_empty():
+		_feedback.text = "（事件内容缺失）"
+		_complete_button.disabled = false
+		return
+	_panel = EventGamePanel.create_panel(gp)
+	_play_box.add_child(_panel)
+	_panel.settled.connect(_on_game_settled)
+	_panel.setup(gp)
 
 
-func _on_choice(index: int, feedback: Array) -> void:
-	if _chosen >= 0:
-		return  # 三选一，只能选一次
-	_chosen = index
-	if index < feedback.size():
-		_feedback.text = String(feedback[index])
+func _on_game_settled(outcome: Dictionary, lines: PackedStringArray) -> void:
+	_pending_outcome = outcome
+	_feedback.text = "\n".join(lines)
 	_complete_button.disabled = false
-	for child in _choices_box.get_children():
-		if child is Button:
-			child.disabled = true
-	choice_chosen.emit(index)
+
+
+func _on_complete_pressed() -> void:
+	_complete_button.disabled = true
+	game_resolved.emit(_pending_outcome)
+	completed.emit()

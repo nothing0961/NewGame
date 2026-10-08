@@ -22,6 +22,7 @@ const ROUTE_HINT_SCROLL := "每列选一个节点前进　（可左右拖动查�
 var _list: VBoxContainer
 var _toast: Label
 var _route_hint: Label
+var _buff_line: Label
 
 
 func _ready() -> void:
@@ -46,6 +47,13 @@ func _build_static_ui() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 26)
 	vbox.add_child(title)
+	# 备战线（design-round10 §4）：有事件轻增益待用时显示，下战登场即消费
+	_buff_line = Label.new()
+	_buff_line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_buff_line.add_theme_font_size_override("font_size", 15)
+	_buff_line.add_theme_color_override("font_color", COLOR_CURRENT)
+	_buff_line.visible = false
+	vbox.add_child(_buff_line)
 	_list = VBoxContainer.new()
 	_list.alignment = BoxContainer.ALIGNMENT_CENTER
 	_list.add_theme_constant_override("separation", 6)
@@ -76,6 +84,15 @@ func build(run_state: RunState) -> void:
 		child.hide()
 		child.queue_free()
 	_toast.visible = false
+	_buff_line.visible = false
+	if run_state.entry_block() > 0 or run_state.entry_draw() > 0:
+		var parts := PackedStringArray()
+		if run_state.entry_block() > 0:
+			parts.append("开局格挡 +%d" % run_state.entry_block())
+		if run_state.entry_draw() > 0:
+			parts.append("起手多抽 %d 张" % run_state.entry_draw())
+		_buff_line.text = "备战：%s" % "，".join(parts)
+		_buff_line.visible = true
 	for layer in range(LayerConfig.MAX_LAYER, 0, -1):
 		_list.add_child(_make_layer_row(layer, run_state))
 		if layer == run_state.current_layer and run_state.is_layer_unlocked(layer):

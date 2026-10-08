@@ -37,6 +37,8 @@ func _initialize() -> void:
 	test_practice_battle()
 	test_layer_data()
 	test_layer_pools_complete()
+	test_event_games_logic()
+	test_event_games_data()
 	test_layer_bosses_complete()
 	test_sin_cards_data()
 	test_last_playable_boundary()
@@ -59,6 +61,8 @@ func _initialize() -> void:
 	await test_map_route_scroll()
 	await test_event_page()
 	await test_event_effect_flow()
+	await test_event_panels()
+	await test_event_buff_lifecycle()
 	await test_transition_page()
 	await test_scene_turn_timer()
 	await test_scene_drag_and_discard()
@@ -190,6 +194,31 @@ func _pool_event(title: String) -> Dictionary:
 		if String(event_item.get("title", "")) == title:
 			return event_item
 	return {}
+
+
+# 全层事件查找（第 3–7 层专属事件如 果子树/天平房）
+func _find_event(title: String) -> Dictionary:
+	for layer in range(2, LayerConfig.LAST_PLAYABLE_LAYER + 1):
+		for event_item in LayerConfig.LAYER_EVENTS[layer]:
+			if String(event_item.get("title", "")) == title:
+				return event_item
+	return {}
+
+
+# 择一小玩法直接走完（选中 → 执行 → 完成）；真实鼠标拖拽路径由 test_event_panels 覆盖
+func _complete_pick_event(page: Control, index := 0) -> void:
+	var panel := page._panel as PickPanel
+	panel.select(index)
+	panel._on_exec_pressed()
+	(page._complete_button as Button).pressed.emit()
+
+
+# 真实鼠标拖拽（引擎走链）：按下 → 越过拖拽阈值 → 移到落点 → 松手
+func _mouse_drag(viewport: Viewport, from_point: Vector2, to_point: Vector2) -> void:
+	_push_mouse_button(viewport, from_point, true)
+	_push_mouse_motion(viewport, from_point + Vector2(12.0, -12.0))
+	_push_mouse_motion(viewport, to_point)
+	_push_mouse_button(viewport, to_point, false)
 
 
 func _route_signature(route: Array) -> String:
@@ -1176,7 +1205,8 @@ func test_layer_data() -> void:
 	for battle in LayerConfig.LAYER2_BATTLES:
 		check(String(battle.get("type", "")) == LayerConfig.TYPE_BATTLE and String(battle.get("enemy", "")) != "" and int(battle.get("enemy_hp", 0)) > 0 and not (battle.get("enemy_deck", {}) as Dictionary).is_empty(), "作战池字段完整：" + String(battle.get("enemy", "")))
 	for event_item in LayerConfig.LAYER2_EVENTS:
-		check(String(event_item.get("title", "")) != "" and String(event_item.get("scene", "")) != "" and (event_item.get("choices", []) as Array).size() == 3 and (event_item.get("feedback", []) as Array).size() == 3, "事件池字段完整：" + String(event_item.get("title", "")))
+		var gp: Dictionary = event_item.get("gameplay", {})
+		check(String(event_item.get("title", "")) != "" and String(event_item.get("scene", "")) != "" and not gp.is_empty() and EventGames.validate(gp).is_empty(), "事件池字段完整：" + String(event_item.get("title", "")))
 	# 生成器不变量·第 2 层细查（种子化 40 掷）：列数极值 2/4 都出现过；单图 ≤9 节点＝池容量，
 	# 全图不重复；同列必不重复
 	var rng := RandomNumberGenerator.new()
@@ -1348,30 +1378,95 @@ func test_layer_pools_complete() -> void:
 			check(deck_ok and total == 8, "第 %d 层敌牌组 8 张且全为敌牌：%s" % [layer, enemy])
 		for event_item in events:
 			var title := String(event_item.get("title", ""))
-			check(String(event_item.get("scene", "")) != "" and (event_item.get("choices", []) as Array).size() == 3 and (event_item.get("feedback", []) as Array).size() == 3, "第 %d 层事件字段完整：%s" % [layer, title])
+			var gp: Dictionary = event_item.get("gameplay", {})
+			var gp_errors := EventGames.validate(gp)
+			var gp_note := "" if gp_errors.is_empty() else "（%s）" % ", ".join(gp_errors)
+			check(String(event_item.get("scene", "")) != "" and not gp.is_empty() and gp_errors.is_empty(), "第 %d 层事件玩法合法：%s%s" % [layer, title, gp_note])
 			check(not names.has(title), "第 %d 层名不重：%s" % [layer, title])
 			names[title] = true
-			var effects: Array = event_item.get("effects", [])
-			check(effects.size() == 3, "第 %d 层事件效果对齐选项数：%s" % [layer, title])
-			# 每事件 ≥1 个无代价项（空效果或疗愈）；效果词汇仅 hp 整数（非 0）
-			var has_safe := false
-			var effects_ok := true
-			for effect in effects:
-				if not (effect is Dictionary):
-					effects_ok = false
-					continue
-				var dict: Dictionary = effect
-				if dict.is_empty():
-					has_safe = true
-					continue
-				for key in dict:
-					if String(key) != "hp":
-						effects_ok = false
-					elif typeof(dict[key]) != TYPE_INT or int(dict[key]) == 0:
-						effects_ok = false
-					elif int(dict[key]) > 0:
-						has_safe = true
-			check(effects_ok and has_safe, "第 %d 层事件效果词汇＝hp 整数且≥1 个无代价项：%s" % [layer, title])
+
+
+# 事件小玩法纯结算（design-round10 §1/§3）：四模块结算、outcome 词汇、守护校验
+func test_event_games_logic() -> void:
+	print("[事件小玩法纯逻辑：择一/分拣/配平/揭示＋结果词汇＋守护校验]")
+	# 择一
+	var pick_gp := {"cards": [
+		{"name": "甲", "outcome": {"hp": 1}, "text": "甲文"},
+		{"name": "乙", "outcome": {}},
+		{"name": "丙", "outcome": {"hp": -2}},
+	]}
+	var picked := EventGames.resolve_pick(pick_gp, 0)
+	check(int((picked.get("outcome", {}) as Dictionary).get("hp", 0)) == 1 and String(picked.get("text", "")) == "甲文", "择一：整卡结果与文本")
+	check(EventGames.resolve_pick(pick_gp, 3).is_empty() and EventGames.resolve_pick(pick_gp, -1).is_empty(), "择一：越界返回空")
+	# 分拣
+	var sort_gp := {"cards": [
+		{"left": {"hp": 1}, "right": {}},
+		{"left": {}, "right": {"block": 1}},
+	]}
+	var sorted_outcome: Dictionary = EventGames.resolve_sort(sort_gp, ["left", "right"]).get("outcome", {})
+	check(int(sorted_outcome.get("hp", 0)) == 1 and int(sorted_outcome.get("block", 0)) == 1, "分拣：两侧求和")
+	check(EventGames.resolve_sort(sort_gp, ["left"]).is_empty(), "分拣：张数不符返回空")
+	check(EventGames.resolve_sort(sort_gp, ["left", ""]).is_empty(), "分拣：有卡未放返回空")
+	# 配平
+	var bal_gp := {"target": 4, "cards": [{"weight": 1}, {"weight": 3}, {"weight": 2}]}
+	check(EventGames.balance_sum(bal_gp, [0, 1]) == 4, "配平：Σ 权重")
+	check(EventGames.balance_sum(bal_gp, [0, 99, -1]) == 1, "配平：越界下标忽略")
+	check(int((EventGames.resolve_balance(bal_gp, [0, 1]).get("outcome", {}) as Dictionary).get("hp", 0)) == 1, "配平：差 0 → hp+1（默认档）")
+	check(EventGames.is_empty_outcome(EventGames.resolve_balance(bal_gp, [0, 2]).get("outcome", {})), "配平：差 1 → 无变化")
+	check(int((EventGames.resolve_balance(bal_gp, [2]).get("outcome", {}) as Dictionary).get("hp", 0)) == -1, "配平：差 ≥2 → hp−1")
+	# 揭示
+	var rev_gp := {
+		"cards": [{"outcome": {"hp": 1}, "text": "甜"}, {"outcome": {"block": 1}}],
+		"finish": {"outcome": {"block": 1}, "text": "补"},
+	}
+	check(int((EventGames.resolve_reveal_flip(rev_gp, 0).get("outcome", {}) as Dictionary).get("hp", 0)) == 1, "揭示：翻单张结算")
+	check(EventGames.resolve_reveal_flip(rev_gp, 9).is_empty(), "揭示：越界返回空")
+	var rev_finish := EventGames.resolve_reveal_finish(rev_gp)
+	check(int((rev_finish.get("outcome", {}) as Dictionary).get("block", 0)) == 1 and String(rev_finish.get("text", "")) == "补", "揭示：全翻追加奖励")
+	check(EventGames.resolve_reveal_finish({"cards": []}).is_empty(), "揭示：无 finish 不追加")
+	# outcome 词汇
+	check(EventGames.outcome_line({"hp": -1, "block": 2}) == "生命 -1 · 开局格挡 +2", "结果行按词汇拼接")
+	check(EventGames.outcome_line({}) == "（这一趟没有留下什么，也没有带走什么。）", "空结果固定读白")
+	check(EventGames.add_outcome({"hp": 1}, {"hp": -1, "draw": 1}) == {"draw": 1}, "结果相加：零键丢弃")
+	check(EventGames.normalize_outcome({"hp": 2.0, "junk": 9}) == {"hp": 2}, "归一：float 转 int、未知键丢弃")
+	# 守护校验
+	check(not EventGames.validate({"module": "nope", "cards": [{"outcome": {}}]}).is_empty(), "守护：未知模块报错")
+	check(not EventGames.validate({"module": "pick", "cards": [{"outcome": {"hp": -1}}]}).is_empty(), "守护：择一无温和路径报错")
+	check(not EventGames.validate({"module": "pick", "cards": [{"outcome": {"hp": 9}}]}).is_empty(), "守护：数值超区间报错")
+	var two_draws := {"module": "pick", "cards": [{"outcome": {"draw": 1}}, {"outcome": {"draw": 1}}]}
+	check(not EventGames.validate(two_draws).is_empty(), "守护：draw 多于 1 处报错")
+	var bad_balance := {"module": "balance", "target": 6, "cards": [{"weight": 1}, {"weight": 2}]}
+	check(not EventGames.validate(bad_balance).is_empty(), "守护：配平无温和路径报错")
+	var good_sort := {"module": "sort", "left_label": "左", "right_label": "右", "cards": [{"left": {"hp": 1}, "right": {}}]}
+	check(EventGames.validate(good_sort).is_empty(), "守护：合法分拣通过")
+
+
+# 事件玩法数据全量守护（design-round10 §2）：38 事件 validate 全过＋模块分布＋样例细查
+func test_event_games_data() -> void:
+	print("[事件玩法数据：38 事件守护＋模块分布＋样例]")
+	var counts := {"pick": 0, "sort": 0, "balance": 0, "reveal": 0}
+	var total := 0
+	for layer in range(2, LayerConfig.LAST_PLAYABLE_LAYER + 1):
+		for event_item in LayerConfig.LAYER_EVENTS[layer]:
+			total += 1
+			var title := String(event_item.get("title", ""))
+			var gp: Dictionary = event_item.get("gameplay", {})
+			var errors := EventGames.validate(gp)
+			var note := "" if errors.is_empty() else "（%s）" % ", ".join(errors)
+			check(errors.is_empty(), "第 %d 层·%s 玩法合法%s" % [layer, title, note])
+			var module := String(gp.get("module", ""))
+			counts[module] = int(counts.get(module, 0)) + 1
+			if module == "reveal":
+				check(String(gp.get("stop_label", "")) != "", "第 %d 层·%s 揭示有收手按钮文案" % [layer, title])
+	check(total == 38, "第 2–7 层共 38 个事件")
+	check(counts["pick"] == 22 and counts["sort"] == 4 and counts["balance"] == 3 and counts["reveal"] == 9, "模块分布 22/4/3/9")
+	var flame: Dictionary = _pool_event("粉焰之墙").get("gameplay", {})
+	check(flame.get("finish") is Dictionary and not (flame.get("finish") as Dictionary).is_empty(), "粉焰之墙＝全翻奖励变体")
+	check((_pool_event("糖果摊").get("gameplay", {}) as Dictionary).get("finish") == null, "糖果摊＝随时收手变体")
+	var tree: Dictionary = _find_event("果子树").get("gameplay", {})
+	check(int(tree.get("capacity", 0)) == 2 and String(tree.get("capacity_side", "")) == "left", "果子树：摘下来至多 2 张")
+	var scale_gp: Dictionary = _find_event("天平房").get("gameplay", {})
+	check(int(scale_gp.get("target", 0)) == 6 and (scale_gp.get("cards", []) as Array).size() == 5, "天平房：目标 6／五件道具")
 
 
 # 各层层主三键守护（STRIP 死锁防线）：sin_card/strip_lines/purify_lines 必填、罪卡可载入
@@ -2052,70 +2147,88 @@ func test_map_route_scroll() -> void:
 
 
 func test_event_page() -> void:
-	print("[事件页：三选一 → 就地反馈（＋choice_chosen）→ 完成]")
+	print("[事件页：小玩法结算 → 就地反馈（＋game_resolved）→ 完成]")
 	var page := EventPage.new()
 	var viewport := _attach_scene(page)
 	await process_frame
 	var done: Array = []
-	var choices_log: Array = []
+	var resolved: Array = []
 	page.completed.connect(func() -> void: done.append(true))
-	page.choice_chosen.connect(func(index: int) -> void: choices_log.append(index))
+	page.game_resolved.connect(func(outcome: Dictionary) -> void: resolved.append(outcome))
 	var stage: Dictionary = _pool_event("试衣镜")
 	page.show_event(stage)
+	await process_frame
 	check(page._title.text == "试衣镜", "标题按关卡")
 	check(page._scene.text.contains("试衣镜"), "场景说明在屏上")
-	check(not _deep_has_text(page, "占位"), "事件页无玩法区占位提示")
-	check(page._choices_box.get_child_count() == 3, "三个选项按钮")
+	var panel := page._panel as PickPanel
+	check(panel != null, "注入择一小玩法面板")
 	var complete_button := page._complete_button as Button
-	check(complete_button.disabled, "未选择不能完成")
-	var choice0 := page._choices_box.get_child(0) as Button
-	choice0.pressed.emit()
-	check(page._feedback.text == String(stage["feedback"][0]), "选择后展出对应反馈")
-	check(not complete_button.disabled, "选择后可以完成")
-	check(choice0.disabled, "选择后选项锁定（只能选一次）")
-	check(choices_log == [0], "选择发出 choice_chosen(0)")
-	choice0.pressed.emit()
-	check(choices_log == [0], "已锁定后重复点击不再发出（三选一仅一次）")
+	check(complete_button.disabled, "未结算不能完成")
+	panel.select(0)
+	check(complete_button.disabled, "选中还没执行＝不能完成")
+	panel._on_exec_pressed()
+	check(not complete_button.disabled, "结算后可以完成")
+	check(page._pending_outcome == {"hp": 1}, "结算结果记入待完成 outcome")
+	check(page._feedback.text.contains("布料软得像雾"), "结算读白在屏")
+	panel._on_exec_pressed()
+	check(page._pending_outcome == {"hp": 1}, "重复执行被挡（已提交）")
 	complete_button.pressed.emit()
 	check(done == [true], "发出 completed")
-	# 第二个事件（合唱席）同样能上屏（等一帧清掉旧选项按钮）
+	check(resolved == [{"hp": 1}], "先发出 game_resolved（带 outcome）")
+	# 第二个事件（合唱席）重开：面板替换、反馈清空、完成复位
 	var candle: Dictionary = _pool_event("合唱席")
 	page.show_event(candle)
 	await process_frame
 	check(page._title.text == "合唱席", "第二列事件节点数据完整")
-	check(page._choices_box.get_child_count() == 3, "合唱席三个选项")
-	check(page._feedback.text == "" and complete_button.disabled, "重开后反馈清空、完成按钮复位")
+	check(page._panel is PickPanel and page._panel != panel, "第二个事件注入新面板")
+	check(page._pending_outcome.is_empty() and complete_button.disabled, "重开后待完成结果清空、完成按钮复位")
+	check(page._feedback.text == "", "重开后反馈清空")
 	viewport.queue_free()
 	await process_frame
 
 
-# 事件效果结算链（design-round8）：choice_chosen → main_flow._on_event_choice → pending_hp_delta → 入战 HP
+# 事件效果结算链（design-round10 §4）：小玩法 outcome → 完成落账 → 下一战落地（hp 续航＋block/draw 轻增益＋消费）
 func test_event_effect_flow() -> void:
-	print("[事件效果结算：选择 → 层内续航修正 → 带伤入战]")
+	print("[事件效果结算：揭示全翻 → 层内续航＋下一战轻增益 → 入战消费]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
 	await process_frame
 	main.run.tutorial_done = true
-	main.run.route = _fixture_route()
+	main.run.route = [[_pool_event("粉焰之墙")], [_pool_battle("糖丝傀儡")]]
 	main.run.route_layer = main.run.current_layer
 	main._open_map()
 	var map_page := main.get_node("%MapPage") as Control
 	var event_page := main.get_node("%EventPage") as Control
 	var confirm_primary := main.get_node("%ConfirmPrimaryButton") as Button
-	# 第一列·事件（试衣镜）→ 事件页；用确定性效果表覆盖（掉 1 / 稳妥 / 疗愈 1）
-	var fog := _deep_find_button(map_page, "事件·试衣镜")
-	fog.pressed.emit()
+	var flame := _deep_find_button(map_page, "事件·粉焰之墙")
+	check(flame != null and not flame.disabled, "第一列事件节点当前可点")
+	flame.pressed.emit()
 	confirm_primary.pressed.emit()
 	check(event_page.visible, "进入事件页")
-	check(String(main._active_event.get("title", "")) == "试衣镜", "当前事件已记录（效果结算用）")
-	main._active_event = {"effects": [{"hp": -1}, {}, {"hp": 1}]}
-	(event_page._choices_box.get_child(0) as Button).pressed.emit()
-	check(main.run.pending_hp_delta == -1, "掉血选项合入续航修正（−1）")
-	(event_page._choices_box.get_child(0) as Button).pressed.emit()
-	check(main.run.pending_hp_delta == -1, "锁定后重复点击不再结算")
+	await process_frame
+	await process_frame
+	var reveal := event_page._panel as RevealPanel
+	check(reveal != null, "注入揭示小玩法面板")
+	# 真实鼠标拖出第一张（温）：松手任意处＝翻面
+	var prop0 := reveal._props[0] as EventPropCard
+	_mouse_drag(viewport, prop0.get_global_rect().get_center(), prop0.get_global_rect().get_center() + Vector2(90.0, 90.0))
+	check(reveal.flipped_indices() == [0], "拖出的牌翻面（真实鼠标）")
+	check((event_page._complete_button as Button).disabled, "只翻一张还没结算＝不能完成")
+	# 翻完剩余两张 → reveal+finish 变体自动结算
+	reveal.flip(1)
+	reveal.flip(2)
+	check(reveal.flipped_indices() == [0, 1, 2], "三张全翻")
+	check(event_page._pending_outcome == {"hp": -1, "block": 1}, "全翻＝逐卡 Σ＋奖励（生命−1・格挡+1）")
+	check(event_page._feedback.text.contains("你伸手碰过每一簇火"), "全翻奖励读白在屏")
+	check(event_page._feedback.text.contains("生命 -1 · 开局格挡 +1"), "自动结果行在屏")
+	reveal.flip(0)
+	check(reveal.flipped_indices() == [0, 1, 2], "重复翻同一张幂等")
+	check(main.run.pending_hp_delta == 0 and main.run.pending_block == 0, "完成前不落账（game_resolved 在完成时发）")
 	(event_page._complete_button as Button).pressed.emit()
 	check(map_page.visible, "事件完成回地图")
-	# 第二列·作战（糖丝傀儡）：带伤入场 9/10
+	check(main.run.pending_hp_delta == -1, "hp 修正落账（层内续航 −1）")
+	check(main.run.pending_block == 1, "格挡落账（下一战 +1）")
+	# 第二列·作战（糖丝傀儡）：带伤入场 19/20，开局格挡 +1 并在开战时消费
 	var echo := _deep_find_button(map_page, "作战·糖丝傀儡")
 	echo.pressed.emit()
 	confirm_primary.pressed.emit()
@@ -2126,6 +2239,156 @@ func test_event_effect_flow() -> void:
 	check(battle.state.enemy_name == "糖丝傀儡", "第二列作战按节点")
 	check(battle.state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "带伤入场（你：19 / 20）")
 	check((battle.get_node("%PlayerHpLabel") as Label).text == "你：19 / 20", "入战 HUD 显示带伤入场")
+	check(battle.state.player_block == 1, "开局格挡 +1 已上手")
+	check(battle.state.hand.size() == BattleConfig.HAND_SIZE, "起手张数＝默认（本场无多抽）")
+	var battle_log := battle.get_node("%LogText") as RichTextLabel
+	check(battle_log.get_parsed_text().contains("备战：开局 +1 格挡"), "备战日志行在战斗日志")
+	check(main.run.pending_block == 0 and main.run.pending_draw == 0, "轻增益开战即消费")
+	check(main.run.pending_hp_delta == -1, "hp 修正不随开战消费（层内保留）")
+	viewport.queue_free()
+	await process_frame
+
+
+# 四模块面板交互（design-round10 §1/§5）：真实鼠标拖拽走引擎投放链（含槽位 PanelContainer 穿透）
+func test_event_panels() -> void:
+	print("[小玩法面板：择一/分拣（含容量拒收）/配平（含取下）/揭示——真实鼠标拖拽]")
+	var page := EventPage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	await process_frame
+	var resolved: Array = []
+	page.game_resolved.connect(func(outcome: Dictionary) -> void: resolved.append(outcome))
+	var complete_button := page._complete_button as Button
+	# 择一（试衣镜）：拖第一张进行动槽 → 执行 → 完成
+	page.show_event(_pool_event("试衣镜"))
+	await process_frame
+	await process_frame
+	var pick := page._panel as PickPanel
+	check(pick != null, "择一面板在")
+	_mouse_drag(viewport, (pick._props[0] as EventPropCard).get_global_rect().get_center(), pick._slot.get_global_rect().get_center())
+	check(pick._selected == 0, "择一：拖进行动槽即选中（引擎投放链打到面板）")
+	pick._on_exec_pressed()
+	check(page._pending_outcome == {"hp": 1}, "择一：执行结算")
+	complete_button.pressed.emit()
+	# 分拣（果子树）：左筐容量 2（第三张被拒）；全放好才能收好
+	page.show_event(_find_event("果子树"))
+	await process_frame
+	await process_frame
+	var sort_panel := page._panel as SortPanel
+	check(sort_panel != null, "分拣面板在")
+	var props := sort_panel._props
+	var left_center := sort_panel._left_slot.get_global_rect().get_center()
+	var right_center := sort_panel._right_slot.get_global_rect().get_center()
+	_mouse_drag(viewport, (props[0] as EventPropCard).get_global_rect().get_center(), left_center)
+	_mouse_drag(viewport, (props[1] as EventPropCard).get_global_rect().get_center(), left_center)
+	check(sort_panel.side_of(0) == "left" and sort_panel.side_of(1) == "left", "分拣：两张进左筐")
+	check((sort_panel._done_button as Button).disabled, "分拣：没放完不能收好")
+	_mouse_drag(viewport, (props[2] as EventPropCard).get_global_rect().get_center(), left_center)
+	check(sort_panel.side_of(2) == "", "分拣：左筐超容量被拒")
+	_mouse_drag(viewport, (props[2] as EventPropCard).get_global_rect().get_center(), right_center)
+	_mouse_drag(viewport, (props[3] as EventPropCard).get_global_rect().get_center(), right_center)
+	check(sort_panel.side_of(2) == "right" and sort_panel.side_of(3) == "right", "分拣：其余进右筐")
+	check(not (sort_panel._done_button as Button).disabled, "分拣：全放好可以收好")
+	(sort_panel._done_button as Button).pressed.emit()
+	check(page._pending_outcome == {"draw": 1}, "分拣：收好结算（树顶留树上＝起手多抽 1）")
+	complete_button.pressed.emit()
+	# 配平（天平房）：上盘/拖回取下往返；凑满目标 → 称量
+	page.show_event(_find_event("天平房"))
+	await process_frame
+	await process_frame
+	var bal := page._panel as BalancePanel
+	check(bal != null, "配平面板在")
+	var bal_props := bal._props
+	_mouse_drag(viewport, (bal_props[0] as EventPropCard).get_global_rect().get_center(), bal._pan.get_global_rect().get_center())
+	check(bal.pan_indices() == [0], "配平：金币上盘")
+	_mouse_drag(viewport, (bal_props[0] as EventPropCard).get_global_rect().get_center(), bal._shelf.get_global_rect().get_center())
+	check(bal.pan_indices().is_empty(), "配平：拖回架上取下")
+	_mouse_drag(viewport, (bal_props[2] as EventPropCard).get_global_rect().get_center(), bal._pan.get_global_rect().get_center())
+	_mouse_drag(viewport, (bal_props[3] as EventPropCard).get_global_rect().get_center(), bal._pan.get_global_rect().get_center())
+	_mouse_drag(viewport, (bal_props[4] as EventPropCard).get_global_rect().get_center(), bal._pan.get_global_rect().get_center())
+	check(bal.pan_indices() == [2, 3, 4], "配平：三件上盘（3+2+1＝6）")
+	check(bal._pan_label.text.contains("差 0"), "配平：实时差值归零")
+	(bal._weigh_button as Button).pressed.emit()
+	check(page._pending_outcome == {"hp": 1}, "配平：分毫不差 → 生命+1")
+	complete_button.pressed.emit()
+	# 揭示（糖果摊）：拖一张翻开、随时收手
+	page.show_event(_pool_event("糖果摊"))
+	await process_frame
+	await process_frame
+	var reveal := page._panel as RevealPanel
+	check(reveal != null, "揭示面板在")
+	var candy := reveal._props[1] as EventPropCard
+	var candy_center := candy.get_global_rect().get_center()
+	_mouse_drag(viewport, candy_center, candy_center + Vector2(90.0, 90.0))
+	check(reveal.flipped_indices() == [1], "揭示：拖出即翻（糖纸）")
+	check(complete_button.disabled, "揭示：还没收手不能完成")
+	(reveal._stop_button as Button).pressed.emit()
+	check(page._pending_outcome == {"hp": 1}, "揭示：收手结算已翻的账")
+	check(page._feedback.text.contains("手背于是轻快了一点"), "揭示：逐卡读白在屏")
+	complete_button.pressed.emit()
+	check(resolved == [{"hp": 1}, {"draw": 1}, {"hp": 1}, {"hp": 1}], "四次结算 payload 依次累积")
+	viewport.queue_free()
+	await process_frame
+
+
+# 轻增益生命周期（design-round10 §4）：累加封顶 → story 开战消费 → 层重置清零；练习不消费
+func test_event_buff_lifecycle() -> void:
+	print("[轻增益生命周期：累加封顶/消费/层重置；story 领 buff、练习不吃、地图备战线]")
+	var run := RunState.new()
+	run.apply_outcome({"block": 2})
+	run.apply_outcome({"block": 1})
+	check(run.pending_block == 3, "格挡累加")
+	run.apply_outcome({"block": 2})
+	check(run.pending_block == BattleConfig.PREP_BLOCK_CAP, "格挡封顶 %d" % BattleConfig.PREP_BLOCK_CAP)
+	run.apply_outcome({"draw": 1})
+	run.apply_outcome({"draw": 1})
+	run.apply_outcome({"draw": 1})
+	check(run.pending_draw == BattleConfig.PREP_DRAW_CAP, "多抽封顶 %d" % BattleConfig.PREP_DRAW_CAP)
+	run.apply_hp_delta(-2)
+	check(run.pending_hp_delta == -2 and run.entry_hp() == BattleConfig.PLAYER_MAX_HP - 2, "hp 修正与轻增益互不干扰")
+	run.consume_buffs()
+	check(run.pending_block == 0 and run.pending_draw == 0 and run.pending_hp_delta == -2, "消费只清轻增益、血修正保留")
+	run.reset_layer()
+	check(run.pending_block == 0 and run.pending_draw == 0 and run.pending_hp_delta == 0, "层重置全清")
+	# 战斗侧：story 开局领格挡＋多抽并留日志
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	var deck: Array = []
+	for i in BattleConfig.DECK_SIZE:
+		deck.append("strike")
+	state.start_story(deck, _pool_battle("糖丝傀儡"), BattleConfig.PLAYER_MAX_HP - 2, 1, 1)
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 2, "story 带伤入场")
+	check(state.player_block == 1, "story 开局格挡 1")
+	check(state.hand.size() == BattleConfig.HAND_SIZE + 1, "story 起手多抽 1")
+	check(_log_contains(logs, "备战：开局 +1 格挡，起手多抽 1 张"), "备战日志行按轻增益拼装")
+	# 练习不吃：默认满血默认手牌、无备战日志
+	var practice_logs: Array = []
+	var practice := BattleState.new()
+	practice.log_event.connect(func(text: String) -> void: practice_logs.append(text))
+	practice.start_practice(deck)
+	check(practice.player_hp == BattleConfig.PLAYER_MAX_HP and practice.hand.size() == BattleConfig.HAND_SIZE, "练习默认满血默认手牌")
+	check(not _log_contains(practice_logs, "备战："), "练习不出备战日志")
+	# 地图备战线：有待用轻增益时显示，消费后收起
+	var map_page := MapPage.new()
+	var map_viewport := _attach_scene(map_page)
+	await process_frame
+	var buff_run := RunState.new()
+	buff_run.apply_outcome({"block": 2, "draw": 1})
+	map_page.build(buff_run)
+	check(map_page._buff_line.visible and map_page._buff_line.text.contains("开局格挡 +2") and map_page._buff_line.text.contains("起手多抽 1 张"), "地图备战线显示轻增益")
+	buff_run.consume_buffs()
+	map_page.build(buff_run)
+	check(not map_page._buff_line.visible, "消费后备战线收起")
+	map_viewport.queue_free()
+	await process_frame
+	# 练习战不消费（E2E）：备着增益进练习，增益仍在
+	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport := _attach_scene(main)
+	await process_frame
+	main.run.apply_outcome({"block": 2, "draw": 1})
+	main._on_practice_start_requested()
+	check(main.run.pending_block == 2 and main.run.pending_draw == 1, "练习开战不消费轻增益")
 	viewport.queue_free()
 	await process_frame
 
@@ -2959,8 +3222,11 @@ func test_main_flow_layer2() -> void:
 	check(not overlay.visible, "确认后确认窗关闭")
 	check(event_page.visible, "进入事件页")
 	check(event_page._title.text == "试衣镜", "事件标题按节点")
-	(event_page._choices_box.get_child(0) as Button).pressed.emit()
-	check(not (event_page._complete_button as Button).disabled, "选择后可以完成")
+	var fog_panel := event_page._panel as PickPanel
+	check(fog_panel != null, "试衣镜＝择一小玩法")
+	fog_panel.select(0)
+	fog_panel._on_exec_pressed()
+	check(not (event_page._complete_button as Button).disabled, "择一结算后可以完成")
 	(event_page._complete_button as Button).pressed.emit()
 	check(map_page.visible, "事件完成回地图")
 	check(main.run.column_index == 1, "选路推进到第二列")
@@ -3014,8 +3280,7 @@ func test_main_flow_layer2() -> void:
 	check(overlay.visible, "第二列事件也弹确认窗")
 	confirm_primary.pressed.emit()
 	check(event_page._title.text == "合唱席", "第二列事件标题")
-	(event_page._choices_box.get_child(1) as Button).pressed.emit()
-	(event_page._complete_button as Button).pressed.emit()
+	_complete_pick_event(event_page, 1)
 	check(map_page.visible and main.run.column_index == 2, "事件关走完进入第三列（层主战）")
 	# 第三列·层主战（阿斯莫德）
 	var boss_node := _deep_find_button(map_page, "层主战·阿斯莫德")
@@ -3182,6 +3447,7 @@ func test_save_roundtrip() -> void:
 	run.route = _fixture_route()
 	run.route_layer = 2
 	run.apply_hp_delta(-2)
+	run.apply_outcome({"block": 2, "draw": 1})
 	var pool := CardPool.new()
 	pool.collect_sin("lust")
 	pool.add_to_deck("strike")
@@ -3200,12 +3466,15 @@ func test_save_roundtrip() -> void:
 	check(_route_signature(run2.route) == _route_signature(_fixture_route()), "路线还原")
 	check(run2.route_layer == 2 and run2.current_columns() == run2.route, "路线层号还原且不重生成")
 	check(run2.pending_hp_delta == -2, "层内续航修正还原")
-	# 旧档缺 pending_hp_delta 键：缺省 0（VERSION 2 加键向后兼容）
+	check(run2.pending_block == 2 and run2.pending_draw == 1, "下一战轻增益还原")
+	# 旧档缺 pending 系列键：缺省 0（VERSION 2 加键向后兼容）
 	var legacy: Dictionary = data.duplicate(true)
 	legacy.erase("pending_hp_delta")
+	legacy.erase("pending_block")
+	legacy.erase("pending_draw")
 	var run3 := RunState.new()
 	SaveGame.apply_progress(legacy, run3, CardPool.new())
-	check(run3.pending_hp_delta == 0, "旧档缺续航键默认 0")
+	check(run3.pending_hp_delta == 0 and run3.pending_block == 0 and run3.pending_draw == 0, "旧档缺 pending 键默认 0")
 	var battle_node: Dictionary = run2.route[0][1]
 	check(typeof(battle_node.get("enemy_hp")) == TYPE_INT, "节点血量回读为 int（JSON float 已归一）")
 	var enemy_deck: Dictionary = battle_node.get("enemy_deck", {})
@@ -3257,8 +3526,7 @@ func test_main_flow_save_resume() -> void:
 	(main2.get_node("%ConfirmPrimaryButton") as Button).pressed.emit()
 	var event_page2 := main2.get_node("%EventPage") as Control
 	check(event_page2.visible, "确认后进入事件页")
-	(event_page2._choices_box.get_child(0) as Button).pressed.emit()
-	(event_page2._complete_button as Button).pressed.emit()
+	_complete_pick_event(event_page2, 0)
 	check(main2.run.column_index == 1, "走完一步推进到第二列")
 	viewport2.queue_free()
 	await process_frame

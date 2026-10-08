@@ -73,14 +73,18 @@ var _battle_mode := BattleState.Mode.TUTORIAL
 var _deck: Array = []
 var _stage: Dictionary = {}
 var _entry_hp := -1
+var _entry_block := 0
+var _entry_draw := 0
 var _finished_reported := false
 
 
-func configure(battle_mode: int, deck: Array, stage: Dictionary = {}, entry_hp := -1) -> void:
+func configure(battle_mode: int, deck: Array, stage: Dictionary = {}, entry_hp := -1, entry_block := 0, entry_draw := 0) -> void:
 	_battle_mode = battle_mode
 	_deck = deck
 	_stage = stage
 	_entry_hp = entry_hp
+	_entry_block = entry_block
+	_entry_draw = entry_draw
 
 
 func _ready() -> void:
@@ -105,7 +109,7 @@ func _ready() -> void:
 	if _battle_mode == BattleState.Mode.PRACTICE:
 		state.start_practice(_deck)
 	elif _battle_mode == BattleState.Mode.STORY:
-		state.start_story(_deck, _stage, _entry_hp)
+		state.start_story(_deck, _stage, _entry_hp, _entry_block, _entry_draw)
 	elif _battle_mode == BattleState.Mode.TEACHING:
 		state.start_teaching()
 	else:

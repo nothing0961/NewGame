@@ -50,6 +50,10 @@ const ENEMY_DECK_COMPOSITION := {
 	"enemy_strike": 8,
 }
 
+# 事件轻增益上限（design-round10 §0-⑧）：防单条路线事件滚雪球
+const PREP_BLOCK_CAP := 3
+const PREP_DRAW_CAP := 2
+
 const PRACTICE_ENEMY_NAME := "木桩"
 const PRACTICE_ENEMY_HP := 60
 
@@ -173,4 +177,5 @@ const TEXT_ENEMY_DOMINANT := "「它」占上风。"
 const TEXT_ENEMY_RESISTING := "「她」还在挣，用很轻的声音说：「……对不起。」"
 const TEXT_ROUND_GAIN_PLAYER := "新的一轮——你获得 %d 张牌。"
 const TEXT_ROUND_GAIN_ENEMY := "%s也获得 %d 张牌。"
+const TEXT_PREPARE_BUFF := "备战：%s。"  # 1 参数：如「开局 +1 格挡，起手多抽 1 张」
 const TEXT_END := "这一场，到此结束。"

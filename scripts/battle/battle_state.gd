@@ -92,6 +92,9 @@ var deck_sin_id := ""
 
 var _stage: Dictionary = {}
 var _entry_hp := -1
+# 事件轻增益（design-round10 §4）：story 开局格挡／起手多抽；教学/练习/教程战恒 0
+var _entry_block := 0
+var _entry_draw := 0
 
 
 func start(custom_deck: Array = []) -> void:
@@ -106,9 +109,12 @@ func start_practice(custom_deck: Array = []) -> void:
 
 # 层内关卡战：stage 来自当前层路线（LayerConfig.generate_route 的池抽取节点）的所选节点（enemy / enemy_hp / enemy_deck / boss / sin_card / strip_lines / purify_lines）
 # entry_hp：层内续航修正后的入场 HP（design-round8）；-1＝用满血默认值
-func start_story(custom_deck: Array, stage: Dictionary, entry_hp := -1) -> void:
+# entry_block/entry_draw：事件轻增益（design-round10 §4），开局格挡／起手多抽
+func start_story(custom_deck: Array, stage: Dictionary, entry_hp := -1, entry_block := 0, entry_draw := 0) -> void:
 	_stage = stage
 	_entry_hp = entry_hp
+	_entry_block = maxi(0, entry_block)
+	_entry_draw = maxi(0, entry_draw)
 	_setup(Mode.STORY, custom_deck)
 
 
@@ -519,11 +525,13 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 		_spawn_wave(0)
 	if mode == Mode.PRACTICE:
 		log_event.emit(BattleConfig.TEXT_PRACTICE_START)
-	# 开局：双方各摸五张
-	_draw_from(draw_pile, discard_pile, hand, BattleConfig.HAND_SIZE)
+	# 开局：双方各摸五张（story 有轻增益时玩家起手多抽）
+	var opening_draw := BattleConfig.HAND_SIZE + (_entry_draw if mode == Mode.STORY else 0)
+	_draw_from(draw_pile, discard_pile, hand, opening_draw)
 	if mode != Mode.PRACTICE:
 		_draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, BattleConfig.HAND_SIZE)
 	_start_player_turn()
+	_apply_entry_buffs()
 	if mode == Mode.TEACHING:
 		for line in BattleConfig.TEXT_TEACHING_START:
 			log_event.emit(line)
@@ -600,6 +608,21 @@ func _gain_round_cards() -> void:
 	if mode != Mode.PRACTICE:
 		var enemy_drawn := _draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, gain)
 		log_event.emit(BattleConfig.TEXT_ROUND_GAIN_ENEMY % [enemy_name, enemy_drawn])
+
+
+# 事件轻增益开局生效：_start_player_turn 会清零格挡，故在其后应用（design-round10 §4）；
+# 起手多抽已并入开局摸牌，这里只记账、上格挡
+func _apply_entry_buffs() -> void:
+	if mode != Mode.STORY or (_entry_block <= 0 and _entry_draw <= 0):
+		return
+	var parts := PackedStringArray()
+	if _entry_block > 0:
+		player_block = _entry_block
+		parts.append("开局 +%d 格挡" % _entry_block)
+	if _entry_draw > 0:
+		parts.append("起手多抽 %d 张" % _entry_draw)
+	log_event.emit(BattleConfig.TEXT_PREPARE_BUFF % "，".join(parts))
+	stats_changed.emit()
 
 
 func _start_player_turn() -> void:

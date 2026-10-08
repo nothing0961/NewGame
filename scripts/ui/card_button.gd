@@ -132,6 +132,8 @@ func _build_frame() -> void:
 
 
 func _build_cost_label() -> void:
+	if card.cost < 0:
+		return
 	var label := Label.new()
 	label.name = "CostBadge"
 	label.text = str(card.cost)
