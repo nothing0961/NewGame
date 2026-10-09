@@ -56,6 +56,7 @@ func _initialize() -> void:
 	await test_battle_scene_practice()
 	await test_teaching_battle_scene()
 	await test_prologue_page()
+	await test_story_beats()
 	await test_battle_scene_defeat()
 	await test_map_page()
 	await test_map_route_scroll()
@@ -75,6 +76,7 @@ func _initialize() -> void:
 	await test_sfx_wiring()
 	await test_main_flow_full()
 	await test_main_flow_skip_practice()
+	await test_act2_gating()
 	await test_main_menu_practice_entry()
 	await test_main_flow_layer2()
 	await test_confirm_deck_flow()
@@ -1291,9 +1293,10 @@ func test_layer_data() -> void:
 	check(_route_signature(LayerConfig.generate_route(2, rng_a)) == _route_signature(LayerConfig.generate_route(2, rng_b)), "同种子同路线")
 	check(LayerConfig.transition_lines(2).size() == 3, "第 2 层有上行过渡读白")
 	check(LayerConfig.transition_lines(1).is_empty(), "第 1 层过渡走教程结尾读白")
-	check(LayerConfig.LAYER1_COMPANION == "菲戈蕾", "第 1 层同行者＝菲戈蕾（净化后人身；双名制）")
+	check(LayerConfig.companion_name(1) == "菲戈蕾" and LayerConfig.companion_name(2) == "莉维娅", "同行者人名表：1＝菲戈蕾／2＝莉维娅（双名制，round11）")
+	check(LayerConfig.companion_name(3) == LayerConfig.demon_name(3), "未登记层回退恶魔名")
 	var transition2 := "\n".join(PackedStringArray(LayerConfig.transition_lines(2)))
-	check(transition2.contains("菲戈蕾"), "第 2 层过渡读白含菲戈蕾")
+	check(transition2.contains("菲戈蕾") and transition2.contains("莉维娅"), "第 2 层过渡读白含菲戈蕾与莉维娅（净化后人身）")
 	# RunState：进层懒生成一次、层内稳定；四态；死亡重掷（重生成）＋夹具行进
 	var run := RunState.new()
 	check(run.current_layer == 2, "教程完成后的目标是第 2 层")
@@ -1978,12 +1981,52 @@ func test_prologue_page() -> void:
 		button.pressed.emit()
 	check(text_label.text.contains("八层重叠的魔法结界"), "第 7 拍：八层结界与七位魔法少女设定")
 	button.pressed.emit()
-	check(text_label.text.contains("四种颜色的卡牌"), "第 8 拍：力量化作四色卡牌")
+	check(text_label.text.contains("华丽裙装") and text_label.text.contains("自动变换"), "第 8 拍：力量＝服装变换（新稿，design-round11）")
 	button.pressed.emit()
 	check(text_label.text.contains("彻底污染") and button.text == "迎战", "末拍：菲戈蕾被彻底污染，按钮＝迎战")
 	check(finished_count[0] == 0, "末拍仍在演出中")
 	button.pressed.emit()
 	check(finished_count[0] == 1, "第 9 次推进发出结束信号")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_story_beats() -> void:
+	print("[追及/第二幕拍表：字段完整、素材在场、关键句、末拍按钮；演出页换表参数化（design-round11）]")
+	check(StoryBeats.CHASE_BEATS.size() >= 8 and StoryBeats.ACT2_BEATS.size() >= 10, "两拍表非空且规模合理")
+	var fields_ok := true
+	var bgs_ok := true
+	var chase_text := ""
+	var act2_text := ""
+	for beats in [StoryBeats.CHASE_BEATS, StoryBeats.ACT2_BEATS]:
+		for beat in beats:
+			var text := String(beat.get("text", ""))
+			if text == "" or String(beat.get("button_label", "")) == "" or not (beat.get("bg_color") is Color):
+				fields_ok = false
+			var bg := String(beat.get("bg", ""))
+			if bg == "" or not FileAccess.file_exists(StoryBeats.BG_DIR + bg + ".png"):
+				bgs_ok = false
+	for beat in StoryBeats.CHASE_BEATS:
+		chase_text += String(beat.get("text", "")) + "\n"
+	for beat in StoryBeats.ACT2_BEATS:
+		act2_text += String(beat.get("text", "")) + "\n"
+	check(fields_ok, "每拍：文本/按钮/底色齐全")
+	check(bgs_ok, "每拍底图素材在场（含 3 张新图）")
+	check(chase_text.contains("被污染了，会很痛苦吗") and chase_text.contains("三无") and chase_text.contains("树洞"), "追及段关键句在场（痛苦问答/三无来历/树洞问答）")
+	var last_chase: Dictionary = StoryBeats.CHASE_BEATS[StoryBeats.CHASE_BEATS.size() - 1]
+	check(String(last_chase.get("bg", "")) == "bg_tree_hollow" and String(last_chase.get("button_label", "")) == "面对她", "追及末拍＝树洞入口，按钮面对她")
+	check(act2_text.contains("意识体") and act2_text.contains("强欲") and act2_text.contains("请救救我"), "第二幕关键句在场（意识体/强欲/请救救我）")
+	var last_act2: Dictionary = StoryBeats.ACT2_BEATS[StoryBeats.ACT2_BEATS.size() - 1]
+	check(String(last_act2.get("button_label", "")) == "进入第二层", "第二幕末拍按钮＝进入第二层")
+	# 演出页换表参数化：新建页缺省＝初幕表；传表后按新表推进
+	var page := ProloguePage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	page.start()
+	check((page._text_label as Label).text.contains("音海市"), "无参 start()＝初幕表")
+	page.start(StoryBeats.CHASE_BEATS)
+	check((page._text_label as Label).text.contains("毫不费力"), "传表 start()＝追及表首拍")
+	check(page._beats.size() == StoryBeats.CHASE_BEATS.size(), "换表后按新表推进")
 	viewport.queue_free()
 	await process_frame
 
@@ -3084,9 +3127,12 @@ func test_main_flow_full() -> void:
 	await process_frame
 	check(battle_host.get_child_count() == 0, "练习战斗已释放")
 	(main.get_node("%LeavePracticeButton") as Button).pressed.emit()
-	check(story_page.visible, "离开练习站后回到读白页（追及段）")
-	check(story.text.contains("清空") and story.text.contains("菲戈蕾"), "追及读白：向菲戈蕾方向前进、目标清空血量")
-	check(not story.text.contains("净化时刻"), "告知边界：追及页不提前提净化")
+	check(prologue_page.visible, "离开练习站后进入追及演出（design-round11）")
+	check(prologue_text.text.contains("朝着菲戈蕾所在的方向前进") and not prologue_text.text.contains("净化时刻"), "追及开场拍＋告知边界（不提前提净化）")
+	for _i in StoryBeats.CHASE_BEATS.size():
+		prologue_button.pressed.emit()
+	check(story_page.visible, "追及演出结束进入层主战前读白")
+	check(story.text.contains("清空") and story.text.contains("菲戈蕾"), "临战读白：菲戈蕾、目标清空血量")
 	primary.pressed.emit()
 	check(battle_host.get_child_count() == 1, "教程战进入战斗位")
 	var battle2: Variant = battle_host.get_child(0)
@@ -3108,17 +3154,17 @@ func test_main_flow_full() -> void:
 	cont2.pressed.emit()
 	check(battle2.state.phase == BattleState.Phase.ENDED, "三问走完")
 	await process_frame
-	var transition_page := main.get_node("%TransitionPage") as Control
 	var map_page := main.get_node("%MapPage") as Control
-	check(transition_page.visible, "教程战结束进入上行过渡页")
-	check((transition_page._read_text as Label).text.contains("菲戈蕾"), "同行过渡读白在屏上（菲戈蕾人身）")
+	check(prologue_page.visible, "教程战结束进入第二幕演出（design-round11，取代旧过渡页）")
+	check(prologue_text.text.contains("第二层"), "第二幕开场拍：大树出口过夜")
 	check(main.run.tutorial_done, "教程标记完成")
 	check(main.run.companions.has("菲戈蕾"), "菲戈蕾入同行列")
 	check(main.pool.owned_count("wrath") == 1, "懒惰罪卡入库")
-	var trans_continue := _first_live_button(transition_page, "继续")
-	check(trans_continue != null, "过渡页有继续按钮")
-	trans_continue.pressed.emit()
-	check(map_page.visible, "过渡后进入层地图")
+	check(not main.run.act2_done, "第二幕未看完前不置位")
+	for _i in StoryBeats.ACT2_BEATS.size():
+		prologue_button.pressed.emit()
+	check(main.run.act2_done, "第二幕看完置位")
+	check(map_page.visible, "第二幕结束直达层地图")
 	var layer1_row := _deep_find_button(map_page, "第 1 层·懒惰")
 	check(layer1_row != null and layer1_row.text.contains("已净化"), "第 1 层已净化")
 	var layer2_row := _deep_find_button(map_page, "第 2 层·色欲")
@@ -3158,7 +3204,11 @@ func test_main_flow_skip_practice() -> void:
 	await process_frame
 	check(story_page.visible and story.text.contains("练习站"), "教学说明在屏")
 	secondary.pressed.emit()
-	check(story.text.contains("清空") and story.text.contains("菲戈蕾"), "「直接前进」＝追及读白在屏")
+	check(prologue_page.visible, "「直接前进」＝追及演出在屏（design-round11）")
+	check((prologue_page._text_label as Label).text.contains("朝着菲戈蕾所在的方向前进"), "追及开场拍")
+	for _i in StoryBeats.CHASE_BEATS.size():
+		prologue_button.pressed.emit()
+	check(story_page.visible and story.text.contains("清空") and story.text.contains("菲戈蕾"), "追及演出完＝临战读白在屏")
 	primary.pressed.emit()
 	check(battle_host.get_child_count() == 1, "直接进入教程战")
 	var battle: Variant = battle_host.get_child(0)
@@ -3166,6 +3216,42 @@ func test_main_flow_skip_practice() -> void:
 	check(battle.state.hand.size() == BattleConfig.HAND_SIZE, "没组卡时用默认卡组，开局手牌 5 张")
 	viewport.queue_free()
 	await process_frame
+
+
+func test_act2_gating() -> void:
+	print("[第二幕门控：有档未看→补演第二幕；act2_done→直达地图；读档还原（design-round11）]")
+	var path := "user://save_test_act2.json"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.disabled = false
+	SaveGame.save_path = path
+	# 一：教程完成 + 第二幕未看 → 启动补演第二幕 → 演完进地图并落盘
+	var run := RunState.new()
+	run.tutorial_done = true
+	SaveGame.save_progress(run, CardPool.new())
+	var main1: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport1 := _attach_scene(main1)
+	await process_frame
+	var prologue1 := main1.get_node("%ProloguePage") as Control
+	var map1 := main1.get_node("%MapPage") as Control
+	check(prologue1.visible and not map1.visible, "有档未看第二幕：启动演第二幕")
+	check((prologue1._text_label as Label).text.contains("我们今晚先在这里休息一下"), "首拍＝大树出口过夜")
+	for _i in StoryBeats.ACT2_BEATS.size():
+		(prologue1._continue_button as Button).pressed.emit()
+	check(main1.run.act2_done and map1.visible, "演完置位并进地图")
+	viewport1.queue_free()
+	await process_frame
+	# 二：act2_done 已落盘 → 重启直达地图不重看
+	var main2: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport2 := _attach_scene(main2)
+	await process_frame
+	var map2 := main2.get_node("%MapPage") as Control
+	check(map2.visible and not (main2.get_node("%ProloguePage") as Control).visible, "act2_done 档：直达地图不重看")
+	check(main2.run.act2_done, "读档还原 act2_done")
+	viewport2.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.save_path = SaveGame.DEFAULT_SAVE_PATH
+	SaveGame.disabled = true
 
 
 func test_main_menu_practice_entry() -> void:
@@ -3304,11 +3390,12 @@ func test_main_flow_layer2() -> void:
 	(boss_battle.get_node("%AbsorbButton") as Button).pressed.emit()
 	check(boss_battle.state.phase == BattleState.Phase.DEBRIEF, "收下后进入净化读白")
 	check((boss_battle.get_node("%StoryText") as Label).text.contains("接住"), "净化读白按关卡")
+	check((boss_battle.get_node("%StoryText") as Label).text.contains("莉维娅") and (boss_battle.get_node("%StoryText") as Label).text.contains("找到我了"), "净化读白：人身名莉维娅＋第二幕回调（design-round11）")
 	(boss_battle.get_node("%ContinueButton") as Button).pressed.emit()
 	check(boss_battle.state.phase == BattleState.Phase.ENDED, "层战净化读完直接结束（无三问）")
 	await process_frame
 	check(transition_page.visible, "路线走完进入上行过渡页")
-	check((transition_page._read_text as Label).text.contains("阿斯莫德"), "上行读白在屏")
+	check((transition_page._read_text as Label).text.contains("莉维娅"), "上行读白在屏（净化后人身名）")
 	_first_live_button(transition_page, "继续").pressed.emit()
 	check(map_page.visible, "上行后回地图")
 	check(main.run.current_layer == 3, "上行到第 3 层")
@@ -3320,7 +3407,7 @@ func test_main_flow_layer2() -> void:
 	var layer8_after := _deep_find_button(map_page, "第 8 层·同位体")
 	check(layer8_after != null and layer8_after.text.contains("待续"), "第 8 层待续（本段内容边界）")
 	check(main.run.sin_cards == ["lust"], "色欲入局内收集")
-	check(main.run.companions.has("阿斯莫德"), "阿斯莫德入同行列")
+	check(main.run.companions.has("莉维娅"), "莉维娅入同行列（净化后人身名）")
 	check(main.pool.owned_count("lust") == 1, "罪卡入仓库")
 	viewport.queue_free()
 	await process_frame
@@ -3448,6 +3535,7 @@ func test_save_roundtrip() -> void:
 	run.route_layer = 2
 	run.apply_hp_delta(-2)
 	run.apply_outcome({"block": 2, "draw": 1})
+	run.act2_done = true
 	var pool := CardPool.new()
 	pool.collect_sin("lust")
 	pool.add_to_deck("strike")
@@ -3467,14 +3555,17 @@ func test_save_roundtrip() -> void:
 	check(run2.route_layer == 2 and run2.current_columns() == run2.route, "路线层号还原且不重生成")
 	check(run2.pending_hp_delta == -2, "层内续航修正还原")
 	check(run2.pending_block == 2 and run2.pending_draw == 1, "下一战轻增益还原")
-	# 旧档缺 pending 系列键：缺省 0（VERSION 2 加键向后兼容）
+	check(run2.act2_done, "第二幕标记还原")
+	# 旧档缺 pending 系列/act2_done 键：缺省 0/false（VERSION 2 加键向后兼容）
 	var legacy: Dictionary = data.duplicate(true)
 	legacy.erase("pending_hp_delta")
 	legacy.erase("pending_block")
 	legacy.erase("pending_draw")
+	legacy.erase("act2_done")
 	var run3 := RunState.new()
 	SaveGame.apply_progress(legacy, run3, CardPool.new())
 	check(run3.pending_hp_delta == 0 and run3.pending_block == 0 and run3.pending_draw == 0, "旧档缺 pending 键默认 0")
+	check(not run3.act2_done, "旧档缺 act2_done 默认 false（补看一次第二幕）")
 	var battle_node: Dictionary = run2.route[0][1]
 	check(typeof(battle_node.get("enemy_hp")) == TYPE_INT, "节点血量回读为 int（JSON float 已归一）")
 	var enemy_deck: Dictionary = battle_node.get("enemy_deck", {})
@@ -3506,14 +3597,22 @@ func test_main_flow_save_resume() -> void:
 	check((main1.get_node("%ProloguePage") as Control).visible and not (main1.get_node("%StoryPage") as Control).visible, "无档启动走初幕演出")
 	main1._finish_tutorial()
 	check(FileAccess.file_exists(path), "教程完成即写盘")
+	# 教程收尾进第二幕演出（design-round11）→ 按完置位 act2_done 并落盘
+	var prologue1 := main1.get_node("%ProloguePage") as Control
+	check(prologue1.visible, "教程收尾进第二幕演出")
+	check(not main1.run.act2_done, "收尾时 act2_done 未置位")
+	for _i in StoryBeats.ACT2_BEATS.size():
+		(prologue1._continue_button as Button).pressed.emit()
+	check(main1.run.act2_done, "第二幕看完置位")
+	check(bool(SaveGame.load_progress().get("act2_done", false)), "act2_done 落盘")
 	viewport1.queue_free()
 	await process_frame
-	# 二：重启直达路线（跳过初幕）
+	# 二：重启直达路线（跳过初幕与第二幕）
 	var main2: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport2 := _attach_scene(main2)
 	await process_frame
 	var map2 := main2.get_node("%MapPage") as Control
-	check(map2.visible and not (main2.get_node("%ProloguePage") as Control).visible, "有档启动直达路线")
+	check(map2.visible and not (main2.get_node("%ProloguePage") as Control).visible, "有档启动直达路线（第二幕不重看）")
 	check(main2.run.tutorial_done and main2.run.companions.has("菲戈蕾"), "进度还原")
 	check(not (main2.get_node("%ConfirmOverlay") as Control).visible, "直达不出弹窗")
 	# 三：走一步（事件）→ 自动存盘 → 再重启续到第二列

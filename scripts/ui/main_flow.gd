@@ -27,6 +27,8 @@ var run := RunState.new()
 var _primary_action: Callable = Callable()
 var _secondary_action: Callable = Callable()
 var _practice_return: Callable = Callable()
+# 逐拍演出结束回调（design-round11）：初幕/追及段/第二幕共用同一个 finished 信号派发
+var _performance_next: Callable = Callable()
 var _battle_context := ""  # "tutorial" / "story" / "practice" / "teaching"
 var _battle: Control = null
 # 确认窗待定节点：点节点只备忘，确认主按钮才 choose 落账（design-round5.md §0.4）
@@ -58,19 +60,36 @@ func _ready() -> void:
 			if not data.is_empty():
 				SaveGame.apply_progress(data, run, pool)
 		if run.tutorial_done:
-			_open_map()
+			if run.act2_done:
+				_open_map()
+			else:
+				_show_act2()
 		else:
 			_show_prologue()
 
 
-# 初幕演出（design-round6）：小组脚本全文分拍；演出结束直接进蜗牛教学战
-func _show_prologue() -> void:
-	prologue_page.start()
+# 逐拍演出派发（design-round11）：换表推进，结束调 next（初幕/追及段/第二幕共用）
+func _show_performance(beats: Array, next: Callable) -> void:
+	_performance_next = next
+	prologue_page.start(beats)
 	_show_page(Page.PROLOGUE)
 
 
 func _on_prologue_finished() -> void:
-	_start_teaching_battle()
+	if _performance_next.is_valid():
+		_performance_next.call()
+	else:
+		_start_teaching_battle()
+
+
+# 初幕演出（design-round6）：小组脚本全文分拍；演出结束直接进蜗牛教学战
+func _show_prologue() -> void:
+	_show_performance(PrologueData.BEATS, _start_teaching_battle)
+
+
+# 追及段演出（design-round11）：向菲戈蕾方向追→树洞入口；结束进层主战前读白
+func _show_chase() -> void:
+	_show_performance(StoryBeats.CHASE_BEATS, _show_transform)
 
 
 # 蜗牛教学战（单位制 4；胜利后进教学说明）
@@ -80,11 +99,11 @@ func _start_teaching_battle() -> void:
 
 
 func _show_teach() -> void:
-	_show_story(BattleConfig.TEXT_TEACH, "去练习站", _open_practice_from_teach, "直接前进", _show_transform)
+	_show_story(BattleConfig.TEXT_TEACH, "去练习站", _open_practice_from_teach, "直接前进", _show_chase)
 
 
 func _open_practice_from_teach() -> void:
-	_practice_return = _show_transform
+	_practice_return = _show_chase
 	_open_practice()
 
 
@@ -250,14 +269,25 @@ func _on_battle_ended(practice: bool) -> void:
 
 func _finish_tutorial() -> void:
 	run.tutorial_done = true
-	run.add_companion(LayerConfig.LAYER1_COMPANION)
+	run.add_companion(LayerConfig.companion_name(LayerConfig.TUTORIAL_LAYER))
 	SaveGame.save_progress(run, pool)
-	_show_transition(BattleConfig.TEXT_ENDING)
+	_show_act2()
+
+
+# 第二幕演出（design-round11）：大树出口过夜→翌日启程→旋转楼梯→莉维娅消散入第二层
+func _show_act2() -> void:
+	_show_performance(StoryBeats.ACT2_BEATS, _on_act2_finished)
+
+
+func _on_act2_finished() -> void:
+	run.act2_done = true
+	SaveGame.save_progress(run, pool)
+	_open_map()
 
 
 func _finish_story_stage(collected: Array[String]) -> void:
 	if not collected.is_empty():
-		run.add_companion(LayerConfig.demon_name(run.current_layer))
+		run.add_companion(LayerConfig.companion_name(run.current_layer))
 	_after_route_step()
 
 

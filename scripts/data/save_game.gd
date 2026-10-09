@@ -19,6 +19,7 @@ static func save_progress(run: RunState, pool: CardPool) -> void:
 	var data := {
 		"version": VERSION,
 		"tutorial_done": run.tutorial_done,
+		"act2_done": run.act2_done,
 		"current_layer": run.current_layer,
 		"column_index": run.column_index,
 		"chosen": run.chosen,
@@ -69,10 +70,11 @@ static func apply_progress(data: Dictionary, run: RunState, pool: CardPool) -> v
 	run.companions = _to_string_array(data.get("companions", []))
 	run.route = _normalize_route(data.get("route", []))
 	run.route_layer = int(data.get("route_layer", -1))
-	# 旧档无此键：缺省 0（VERSION 不变，向后兼容）
+	# 旧档无此键：缺省 0／false（VERSION 不变，向后兼容；act2_done 缺省＝补看一次第二幕演出）
 	run.pending_hp_delta = int(data.get("pending_hp_delta", 0))
 	run.pending_block = int(data.get("pending_block", 0))
 	run.pending_draw = int(data.get("pending_draw", 0))
+	run.act2_done = bool(data.get("act2_done", false))
 	if data.has("pool_owned"):
 		var owned := {}
 		var raw: Variant = data["pool_owned"]

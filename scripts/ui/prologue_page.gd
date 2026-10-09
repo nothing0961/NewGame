@@ -1,7 +1,8 @@
 class_name ProloguePage
 extends Control
 
-# 初幕演出页（design-round6）：按 PrologueData.BEATS 逐拍推进；纯代码构建，
+# 通用逐拍演出页（初幕 design-round6；round11 起兼作追及段/第二幕演出）：
+# 按 start() 传入的拍表逐拍推进（缺省 PrologueData.BEATS）；纯代码构建，
 # 底图/立绘运行时直读（Maker 产图无需编辑器导入），文件缺失静默回退纯色底。
 
 signal finished()
@@ -17,14 +18,17 @@ var _text_label: Label
 var _continue_button: Button
 var _beat_index := 0
 var _texture_cache := {}
+var _beats: Array = PrologueData.BEATS
 
 
 func _ready() -> void:
 	_build_static_ui()
 
 
-# 从头开始演出（main_flow 每次进入初幕调用）
-func start() -> void:
+# 从头开始演出；传非空拍表则换表（main_flow 各演出段调用），缺省＝初幕表
+func start(beats: Array = []) -> void:
+	if not beats.is_empty():
+		_beats = beats
 	_beat_index = 0
 	_refresh()
 
@@ -106,14 +110,14 @@ func _build_static_ui() -> void:
 
 func _on_continue_pressed() -> void:
 	_beat_index += 1
-	if _beat_index >= PrologueData.BEATS.size():
+	if _beat_index >= _beats.size():
 		finished.emit()
 	else:
 		_refresh()
 
 
 func _refresh() -> void:
-	var beat: Dictionary = PrologueData.BEATS[_beat_index]
+	var beat: Dictionary = _beats[_beat_index]
 	_bg_fallback.color = beat.get("bg_color", Color(0.07, 0.06, 0.1, 1.0))
 	_apply_texture(_bg_rect, String(beat.get("bg", "")))
 	_apply_texture(_portrait, String(beat.get("portrait", "")))

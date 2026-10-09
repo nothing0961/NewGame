@@ -7,6 +7,8 @@ extends RefCounted
 enum NodeState { DONE, MISSED, CURRENT, FUTURE }
 
 var tutorial_done := false
+# 第二幕演出已看（design-round11）：旧档缺键＝false＝补看一次第二幕演出
+var act2_done := false
 # 教程完成后＝第 2 层；完成第 N 层后＝N+1（超出 MAX_LAYER 视作 demo 边界）
 var current_layer := LayerConfig.TUTORIAL_LAYER + 1
 # 层内逐列进度：当前列索引（0 起）
