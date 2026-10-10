@@ -29,7 +29,7 @@ var _secondary_action: Callable = Callable()
 var _practice_return: Callable = Callable()
 # 逐拍演出结束回调（design-round11）：初幕/追及段/第二幕共用同一个 finished 信号派发
 var _performance_next: Callable = Callable()
-var _battle_context := ""  # "tutorial" / "story" / "practice" / "teaching"
+var _battle_context := ""  # "tutorial" / "story" / "practice" / "teaching" / "ambush"
 var _battle: Control = null
 # 确认窗待定节点：点节点只备忘，确认主按钮才 choose 落账（design-round5.md §0.4）
 var _pending_node_index := -1
@@ -60,10 +60,13 @@ func _ready() -> void:
 			if not data.is_empty():
 				SaveGame.apply_progress(data, run, pool)
 		if run.tutorial_done:
-			if run.act2_done:
-				_open_map()
-			else:
+			if not run.act2_done:
 				_show_act2()
+			elif not run.l2_entry_done and run.current_layer == LayerConfig.TUTORIAL_LAYER + 1 and run.column_index == 0:
+				# 第二层入场补看（design-round12）：仅层初列未开走；更深/中段老档不补防错位
+				_show_l2_entry()
+			else:
+				_open_map()
 		else:
 			_show_prologue()
 
@@ -196,16 +199,25 @@ func _enter_stage(stage: Dictionary) -> void:
 		_open_map()
 		return
 	if String(stage.get("type", "")) == LayerConfig.TYPE_BATTLE:
-		var deck: Array = []
-		if pool.is_deck_valid():
-			deck = pool.deck.duplicate()
-		_battle_context = "story"
-		# 轻增益（design-round10 §4）：story 开局读取并即刻消费；教学/练习/教程战不传不消耗
-		_start_battle(BattleState.Mode.STORY, deck, stage, run.entry_hp(), run.entry_block(), run.entry_draw())
-		run.consume_buffs()
+		# 层主战前演出（design-round12）：intro 键命中非空拍表 → 先演、结束再开战；未知 id/空表回退直开战
+		var intro_beats: Array = StoryBeats.intro_beats(String(stage.get("intro", "")))
+		if not intro_beats.is_empty():
+			_show_performance(intro_beats, _start_story_battle.bind(stage))
+			return
+		_start_story_battle(stage)
 	else:
 		event_page.show_event(stage)
 		_show_page(Page.EVENT)
+
+
+func _start_story_battle(stage: Dictionary) -> void:
+	var deck: Array = []
+	if pool.is_deck_valid():
+		deck = pool.deck.duplicate()
+	_battle_context = "story"
+	# 轻增益（design-round10 §4）：story 开局读取并即刻消费；教学/练习/教程战不传不消耗
+	_start_battle(BattleState.Mode.STORY, deck, stage, run.entry_hp(), run.entry_block(), run.entry_draw())
+	run.consume_buffs()
 
 
 func _on_event_completed() -> void:
@@ -263,6 +275,9 @@ func _on_battle_ended(practice: bool) -> void:
 		_show_teach()
 	elif _battle_context == "tutorial":
 		_finish_tutorial()
+	elif _battle_context == "ambush":
+		# 遭遇战胜＝接 B 段演出（design-round12）；不入层账、不收集
+		_show_l2_entry_after()
 	else:
 		_finish_story_stage(collected)
 
@@ -282,6 +297,26 @@ func _show_act2() -> void:
 func _on_act2_finished() -> void:
 	run.act2_done = true
 	SaveGame.save_progress(run, pool)
+	_show_l2_entry()
+
+
+# 第二层入场（design-round12）：雾中公路 A 段→笔筒污染体遭遇战→B 段（公主抱出发）→落账进 L2 地图
+func _show_l2_entry() -> void:
+	_show_performance(StoryBeats.L2_ENTRY_A, _start_ambush_battle)
+
+
+func _start_ambush_battle() -> void:
+	_battle_context = "ambush"
+	_start_battle(BattleState.Mode.AMBUSH, [])
+
+
+func _show_l2_entry_after() -> void:
+	_show_performance(StoryBeats.L2_ENTRY_B, _on_l2_entry_finished)
+
+
+func _on_l2_entry_finished() -> void:
+	run.l2_entry_done = true
+	SaveGame.save_progress(run, pool)
 	_open_map()
 
 
@@ -299,6 +334,9 @@ func _on_battle_lost() -> void:
 	elif _battle_context == "tutorial":
 		# 教程层主战失败＝回追及段重来（design-round6；不再回初幕演出）
 		_show_transform()
+	elif _battle_context == "ambush":
+		# 遭遇战失败＝原地重开本战（design-round12；不重看 A 段演出）
+		_start_ambush_battle()
 	else:
 		# 死亡回层首＝回第一列重新选路（design-round4.md §0）
 		run.reset_layer()

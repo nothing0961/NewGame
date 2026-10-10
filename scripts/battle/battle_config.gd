@@ -81,6 +81,25 @@ const TEACHING_DECK := ["guard", "strike", "strike", "heal", "strike", "cleanse"
 # 波 2 登场后，睡意倒计时＝当前回合 + 2：到时仍未免疫则跳过一个回合（一次），走完即解
 const TEACHING_SLEEP_DELAY := 2
 
+# —— 笔筒污染体遭遇战（design-round12：第二幕后半·雾中公路入场战）——
+# 真实战斗照教学战模式：钉死牌组、不洗牌、不检定罪卡；魔力体系沿用 Cost 6
+# T1 强攻上限 9（三魔弹＋强欲魔弹＝6 单位）对 10 血留一口气 → T2 补刀，呼应「僵直→欲望魔弹」
+const AMBUSH_ENEMY_NAME := "笔筒污染体"
+const AMBUSH_ENEMY_HP := 10
+const AMBUSH_ENEMY_DECK := {
+	"enemy_strike": 6,
+}
+# 钉死节拍：数组顺序＝摸牌顺序；开局手＝防御＋魔弹×3＋强欲魔弹，牌堆＝防御＋魔弹×2（5＋3 水位）
+const AMBUSH_DECK := ["guard", "strike", "strike", "strike", "greed_shot", "guard", "strike", "strike"]
+const AMBUSH_ROUND_GAIN := 3
+const AMBUSH_HAND_LIMIT := 8
+const AMBUSH_TURN_TIME_LIMIT := 90.0
+const TEXT_AMBUSH_START := [
+	"雾里，那个身影身上的污染亮得像一盏灯。",
+	"菲戈蕾不在身边了——先解决眼前这个污染体。",
+]
+const TEXT_AMBUSH_WIN := "污染体散了架，身上的零件落了一地。"
+
 # 罪卡规则（design/design-round1.md §1）：任务达成或第 SIN_ROUND_FALLBACK 回合保底解锁；每场战斗仅出现并使用一次
 # 任务/保底参数按卡配置（design/design-round3.md §6：按牌组中的罪卡逐卡检定；
 # gluttony–anger 为 design-round8 先行版数值，待罪卡专轮替换）

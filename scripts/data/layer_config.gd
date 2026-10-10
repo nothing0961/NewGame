@@ -233,6 +233,8 @@ const LAYER2_BOSS := {
 	"enemy_hp": 24,
 	"enemy_deck": LAYER2_ENEMY_DECK,
 	"boss": true,
+	# 层主战前演出（design-round12）：先播 StoryBeats 拍表再开战（main_flow._enter_stage 派发）
+	"intro": "l2_boss",
 	"sin_card": "lust",
 	"strip_lines": [
 		"「呀……结束了呀。」她跌坐下去，粉色的裙摆散了一地。",

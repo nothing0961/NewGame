@@ -50,13 +50,16 @@ func _initialize() -> void:
 	test_multi_enemy_helpers()
 	test_teaching_battle_logic()
 	test_teaching_sleep_timeout()
+	test_ambush_battle_logic()
 	# 等一帧让 SceneTree 进入运行态，节点加入 root 时 _ready 才会立即执行
 	await process_frame
 	await test_battle_scene_tutorial()
 	await test_battle_scene_practice()
 	await test_teaching_battle_scene()
+	await test_ambush_battle_scene()
 	await test_prologue_page()
 	await test_story_beats()
+	await test_story_beats_l2()
 	await test_battle_scene_defeat()
 	await test_map_page()
 	await test_map_route_scroll()
@@ -77,6 +80,7 @@ func _initialize() -> void:
 	await test_main_flow_full()
 	await test_main_flow_skip_practice()
 	await test_act2_gating()
+	await test_l2_entry_gating()
 	await test_main_menu_practice_entry()
 	await test_main_flow_layer2()
 	await test_confirm_deck_flow()
@@ -437,6 +441,48 @@ func _drive_teaching_victory(scene: Variant) -> void:
 	state.stage_card(_find_card(state.hand, "cleanse"))
 	state.stage_card(_find_card(state.hand, "greed_shot"))
 	state.commit_staged()
+
+
+# —— 第二层入场链（design-round12）：A 段→遭遇战→B 段 ——
+
+# A 段 5 拍推进（末拍迎战）→ 遭遇战入场；返回战斗场景实例
+func _enter_l2_ambush(main: Variant) -> Variant:
+	var prologue_page := main.get_node("%ProloguePage") as Control
+	var prologue_button := prologue_page._continue_button as Button
+	for _i in StoryBeats.L2_ENTRY_A.size():
+		prologue_button.pressed.emit()
+	return (main.get_node("%BattleHost") as Control).get_child(0)
+
+
+# 遭遇战钉死节拍两回合清场：T1 三魔弹＋强欲魔弹（9 伤留 1 口气）→ T2 补刀
+func _drive_ambush_victory(battle: Variant) -> void:
+	var state: BattleState = battle.state
+	state.debug_force_plays = 0
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "greed_shot"))
+	state.commit_staged()
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.commit_staged()
+
+
+# B 段 8 拍推进 → 落地图（l2_entry_done 置位＋落盘）
+func _finish_l2_entry(main: Variant) -> void:
+	var prologue_page := main.get_node("%ProloguePage") as Control
+	var prologue_button := prologue_page._continue_button as Button
+	for _i in StoryBeats.L2_ENTRY_B.size():
+		prologue_button.pressed.emit()
+
+
+# 第二层入场链全通（A 段 → 遭遇战胜利 → B 段 → 落地图）
+func _complete_l2_entry(main: Variant) -> void:
+	var battle: Variant = _enter_l2_ambush(main)
+	await process_frame
+	_drive_ambush_victory(battle)
+	await process_frame
+	_finish_l2_entry(main)
+	await process_frame
 
 
 func test_cards_load() -> void:
@@ -1769,6 +1815,40 @@ func test_teaching_sleep_timeout() -> void:
 	check(_count_log(logs_b, BattleConfig.TEXT_SLEEP_SKIP) == 0, "无睡意跳过读白")
 
 
+func test_ambush_battle_logic() -> void:
+	print("[笔筒污染体遭遇战：钉死牌序/体系参数/每回合至多一张/T2 清场 ENDED（design-round12）]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_ambush()
+	check(state.mode == BattleState.Mode.AMBUSH, "遭遇战模式")
+	check(state.enemy_name == "笔筒污染体" and state.enemy_hp == 10, "对手＝笔筒污染体 10 血")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP and state.max_cost == BattleConfig.PLAYER_MAX_COST, "HP 20 / Cost 6 体系（沿用常规值）")
+	check(state.hand.size() == 5 and state.hand[0].id == "guard" and state.hand[1].id == "strike" and state.hand[2].id == "strike" and state.hand[3].id == "strike" and state.hand[4].id == "greed_shot", "钉死开局手：防御＋魔弹×3＋强欲魔弹")
+	check(state.draw_pile.size() == 3, "牌堆 3 张（5＋3 水位）")
+	check(state.enemy_hand.size() == 5, "敌方戳击牌组开局摸 5 张")
+	check(state.hand_limit() == 8 and not state.needs_discard(), "手牌上限 8（遭遇战豁免紧缩制）")
+	check(_count_log(logs, String(BattleConfig.TEXT_AMBUSH_START[0])) == 1 and _count_log(logs, String(BattleConfig.TEXT_AMBUSH_START[1])) == 1, "开局两条遭遇读白")
+	# 回合 1：三魔弹＋强欲魔弹＝9 伤 10→1 留一口气；防御留下挡戳击
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.stage_card(_find_card(state.hand, "greed_shot"))
+	check(state.staged_cost() == 6 and state.commit_staged(), "6 单位打满一批打出（4 卡槽）")
+	check(state.enemy_hp == 1, "9 伤 10→1（留一口气）")
+	check(state.turn_count == 2 and state.player_cost == 6, "进入第 2 回合，Cost 刷新")
+	check(_count_log(logs, "笔筒污染体打出「%s」。" % CardDB.get_card("enemy_strike").display_name) == 1, "敌方每回合钉死至多一张")
+	check(_count_log(logs, BattleConfig.TEXT_ENEMY_DOMINANT) == 0 and _count_log(logs, BattleConfig.TEXT_ENEMY_RESISTING) == 0, "无「它/她」占上风读白（遭遇战无此形态）")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 2, "戳击 2 伤无格挡直接吃下")
+	# 回合 2：补刀清场
+	check(state.hand.size() == 4, "第 2 回合摸 3 张（剩 1＋3）")
+	state.stage_card(_find_card(state.hand, "strike"))
+	check(state.commit_staged(), "补刀打出")
+	check(state.phase == BattleState.Phase.ENDED, "全灭＝遭遇战结束")
+	check(_count_log(logs, BattleConfig.TEXT_AMBUSH_WIN) == 1, "胜利读白＝污染体散架")
+	check(not state.absorb_sin() and state.collection.is_empty(), "遭遇战不进净化段、无收藏")
+
+
 func test_battle_scene_tutorial() -> void:
 	print("[战斗场景·教程模式：拖拽摆放 → 收回 → 打出 → 完整一局]")
 	var packed := load("res://scenes/battle.tscn") as PackedScene
@@ -1954,6 +2034,58 @@ func test_teaching_battle_scene() -> void:
 	await process_frame
 
 
+func test_ambush_battle_scene() -> void:
+	print("[遭遇战场景：拖拽清场→battle_ended(false) 无覆盖层；判负→覆盖层教学读白＋「再来一次」→battle_lost]")
+	var scene: Variant = (load("res://scenes/battle.tscn") as PackedScene).instantiate()
+	scene.configure(BattleState.Mode.AMBUSH, [])
+	var viewport := _attach_scene(scene)
+	await process_frame
+	var hand_box := scene.get_node("%HandBox") as Control
+	var play_box := scene.get_node("%PlayBox") as HBoxContainer
+	var commit_button := scene.get_node("%CommitButton") as Button
+	var ended_calls: Array = []
+	scene.battle_ended.connect(func(practice: bool) -> void: ended_calls.append(practice))
+	check((scene.get_node("%EnemyNameLabel") as Label).text == "笔筒污染体", "对手显示笔筒污染体")
+	check((scene.get_node("%TurnTimerLabel") as Label).text == "剩余 90 秒", "遭遇战时限 90 秒")
+	_check_cost_label(scene, "Cost 6 / 6", "Cost 6 体系")
+	check(not (scene.get_node("%Overlay") as Control).visible, "开局无覆盖层")
+	# T1：拖三魔弹＋强欲魔弹打满 6 单位（钉死手无「打」牌干扰，卡名唯一）
+	scene.state.debug_force_plays = 0
+	check(_drag_card_to(scene, _first_live_button(hand_box, "普通魔弹"), play_box), "拖第一张魔弹")
+	check(_drag_card_to(scene, _first_live_button(hand_box, "普通魔弹"), play_box), "拖第二张魔弹")
+	check(_drag_card_to(scene, _first_live_button(hand_box, "普通魔弹"), play_box), "拖第三张魔弹")
+	check(_drag_card_to(scene, _first_live_button(hand_box, "强欲魔弹"), play_box), "拖强欲魔弹")
+	check(scene.state.staged_cost() == 6, "6 单位打满")
+	commit_button.pressed.emit()
+	check(scene.state.enemy_hp == 1, "T1 打满 9 伤留一口气")
+	# T2：补刀清场
+	check(_drag_card_to(scene, _first_live_button(hand_box, "普通魔弹"), play_box), "拖补刀魔弹")
+	commit_button.pressed.emit()
+	check(scene.state.phase == BattleState.Phase.ENDED, "T2 补刀清场")
+	check(ended_calls == [false], "胜局上报 battle_ended(false)")
+	check(not (scene.get_node("%Overlay") as Control).visible, "胜局不进覆盖层")
+	viewport.queue_free()
+	await process_frame
+	# 判负：覆盖层＝教学读白＋「再来一次」，按钮发出 battle_lost
+	var scene2: Variant = (load("res://scenes/battle.tscn") as PackedScene).instantiate()
+	scene2.configure(BattleState.Mode.AMBUSH, [])
+	var viewport2 := _attach_scene(scene2)
+	await process_frame
+	var lost_calls: Array = []
+	scene2.battle_lost.connect(func() -> void: lost_calls.append(true))
+	scene2.state._damage_player(99)
+	check(scene2.state.phase == BattleState.Phase.DEFEAT, "生命归零判负")
+	var overlay2 := scene2.get_node("%Overlay") as Control
+	check(overlay2.visible, "判负覆盖层出现")
+	check((scene2.get_node("%StoryText") as Label).text == BattleConfig.TEXT_DEFEAT_TEACHING, "判负读白＝教学文案（站起来再来一次）")
+	var continue_button := scene2.get_node("%ContinueButton") as Button
+	check(continue_button.text == BattleConfig.TEXT_DEFEAT_RETRY, "按钮＝再来一次")
+	continue_button.pressed.emit()
+	check(lost_calls == [true], "发出 battle_lost（主流程原地重开）")
+	viewport2.queue_free()
+	await process_frame
+
+
 func test_prologue_page() -> void:
 	print("[初幕演出页：9 拍推进、名牌/立绘切换、末拍「迎战」、结束信号]")
 	var page := ProloguePage.new()
@@ -2027,6 +2159,60 @@ func test_story_beats() -> void:
 	page.start(StoryBeats.CHASE_BEATS)
 	check((page._text_label as Label).text.contains("毫不费力"), "传表 start()＝追及表首拍")
 	check(page._beats.size() == StoryBeats.CHASE_BEATS.size(), "换表后按新表推进")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_story_beats_l2() -> void:
+	print("[第二层入场拍表：三表字段/素材在场、关键句、末拍按钮；intro 派发与未知 id 回退（design-round12）]")
+	check(StoryBeats.L2_ENTRY_A.size() == 5 and StoryBeats.L2_ENTRY_B.size() == 8 and StoryBeats.L2_BOSS_INTRO.size() == 3, "三表规模：A 5 拍／B 8 拍／层主战前 3 拍")
+	var fields_ok := true
+	var bgs_ok := true
+	var a_text := ""
+	var b_text := ""
+	var intro_text := ""
+	for beats in [StoryBeats.L2_ENTRY_A, StoryBeats.L2_ENTRY_B, StoryBeats.L2_BOSS_INTRO]:
+		for beat in beats:
+			var text := String(beat.get("text", ""))
+			if text == "" or String(beat.get("button_label", "")) == "" or not (beat.get("bg_color") is Color):
+				fields_ok = false
+			var bg := String(beat.get("bg", ""))
+			if bg == "" or not FileAccess.file_exists(StoryBeats.BG_DIR + bg + ".png"):
+				bgs_ok = false
+	for beat in StoryBeats.L2_ENTRY_A:
+		a_text += String(beat.get("text", "")) + "\n"
+	for beat in StoryBeats.L2_ENTRY_B:
+		b_text += String(beat.get("text", "")) + "\n"
+	for beat in StoryBeats.L2_BOSS_INTRO:
+		intro_text += String(beat.get("text", "")) + "\n"
+	check(fields_ok, "每拍：文本/按钮/底色齐全")
+	check(bgs_ok, "每拍底图素材在场（bg_fog_road/bg_town/bg_castle）")
+	check(String(StoryBeats.L2_ENTRY_A[0].get("bg", "")) == "bg_fog_road" and String(StoryBeats.L2_ENTRY_B[6].get("bg", "")) == "bg_town", "A 段雾中公路开场 / B 段第 7 拍进小镇")
+	check(String(StoryBeats.L2_ENTRY_A[1].get("portrait", "")) == "figelie" and a_text.contains("贝嘉别怕，菲戈蕾，还在"), "A 段第 2 拍：菲戈蕾握手安抚（立绘）")
+	check(a_text.contains("这条路，真的是正确的吗") and a_text.contains("先解决这个污染体了"), "A 段关键句（迷失怀疑/迎战决意）")
+	var last_a: Dictionary = StoryBeats.L2_ENTRY_A[StoryBeats.L2_ENTRY_A.size() - 1]
+	check(String(last_a.get("button_label", "")) == "迎战", "A 段末拍按钮＝迎战")
+	check(b_text.contains("原来那武器是钢笔吗") and b_text.contains("普通的十六岁少女") and b_text.contains("请——") and b_text.contains("微微上扬的嘴角"), "B 段关键句（笔筒真相/崩溃/莉维娅引导/公主抱收束）")
+	check(String(StoryBeats.L2_ENTRY_B[3].get("portrait", "")) == "" and String(StoryBeats.L2_ENTRY_B[4].get("portrait", "")) == "" and String(StoryBeats.L2_ENTRY_B[5].get("portrait", "")) == "", "B 段第 4–6 拍无立绘（莉维娅声音引导段）")
+	var last_b: Dictionary = StoryBeats.L2_ENTRY_B[StoryBeats.L2_ENTRY_B.size() - 1]
+	check(String(last_b.get("button_label", "")) == "继续", "B 段末拍按钮＝继续（公主抱出发收束）")
+	check(String(StoryBeats.L2_BOSS_INTRO[2].get("portrait", "")) == "livia_corrupt" and intro_text.contains("游戏开始咯"), "层主战前末拍：污染形态立绘＋对峙台词")
+	var last_intro: Dictionary = StoryBeats.L2_BOSS_INTRO[StoryBeats.L2_BOSS_INTRO.size() - 1]
+	check(String(last_intro.get("button_label", "")) == "迎战", "层主战前末拍按钮＝迎战")
+	# intro 派发（design-round12）：l2_boss 命中 / 未知 id 空表回退直开战
+	check(StoryBeats.intro_beats("l2_boss") == StoryBeats.L2_BOSS_INTRO, "intro 派发：l2_boss → 层主战前 3 拍")
+	check(StoryBeats.intro_beats("unknown_id").is_empty(), "未知 intro id → 空表（回退直接开战）")
+	check(String(LayerConfig.LAYER2_BOSS.get("intro", "")) == "l2_boss", "L2 层主节点带 intro 键")
+	# 演出页换表参数化：传入场 A 表推进
+	var page := ProloguePage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	page.start(StoryBeats.L2_ENTRY_A)
+	var text_label := page._text_label as Label
+	check(text_label.text.contains("什么都看不见"), "传表 start()＝入场 A 段首拍（雾中公路）")
+	check((page._continue_button as Button).text == "继续", "A 段首拍按钮＝继续")
+	(page._continue_button as Button).pressed.emit()
+	check((page._speaker_label as Label).text == "菲戈蕾" and text_label.text.contains("贝嘉别怕，菲戈蕾，还在"), "A 段第 2 拍：菲戈蕾安抚（名牌＋立绘拍）")
 	viewport.queue_free()
 	await process_frame
 
@@ -3164,7 +3350,9 @@ func test_main_flow_full() -> void:
 	for _i in StoryBeats.ACT2_BEATS.size():
 		prologue_button.pressed.emit()
 	check(main.run.act2_done, "第二幕看完置位")
-	check(map_page.visible, "第二幕结束直达层地图")
+	check(prologue_page.visible and prologue_text.text.contains("映入眼帘的是一条公路"), "第二幕结束接第二层入场演出（design-round12）")
+	await _complete_l2_entry(main)
+	check(main.run.l2_entry_done and map_page.visible, "入场全链（A→遭遇战→B）走完落地图")
 	var layer1_row := _deep_find_button(map_page, "第 1 层·懒惰")
 	check(layer1_row != null and layer1_row.text.contains("已净化"), "第 1 层已净化")
 	var layer2_row := _deep_find_button(map_page, "第 2 层·色欲")
@@ -3219,12 +3407,12 @@ func test_main_flow_skip_practice() -> void:
 
 
 func test_act2_gating() -> void:
-	print("[第二幕门控：有档未看→补演第二幕；act2_done→直达地图；读档还原（design-round11）]")
+	print("[第二幕门控：有档未看→补演第二幕→接第二层入场；双门控档→直达地图；读档还原（design-round11/12）]")
 	var path := "user://save_test_act2.json"
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	SaveGame.disabled = false
 	SaveGame.save_path = path
-	# 一：教程完成 + 第二幕未看 → 启动补演第二幕 → 演完进地图并落盘
+	# 一：教程完成 + 第二幕未看 → 启动补演第二幕 → 演完接第二层入场（design-round12）→ 全链走完落地图
 	var run := RunState.new()
 	run.tutorial_done = true
 	SaveGame.save_progress(run, CardPool.new())
@@ -3237,17 +3425,87 @@ func test_act2_gating() -> void:
 	check((prologue1._text_label as Label).text.contains("我们今晚先在这里休息一下"), "首拍＝大树出口过夜")
 	for _i in StoryBeats.ACT2_BEATS.size():
 		(prologue1._continue_button as Button).pressed.emit()
-	check(main1.run.act2_done and map1.visible, "演完置位并进地图")
+	check(main1.run.act2_done and prologue1.visible, "演完置位并接第二层入场（A 段）")
+	check((prologue1._text_label as Label).text.contains("什么都看不见"), "A 段首拍＝雾中公路开场")
+	await _complete_l2_entry(main1)
+	check(main1.run.l2_entry_done and map1.visible, "入场全链（A→遭遇战→B）走完落地图")
 	viewport1.queue_free()
 	await process_frame
-	# 二：act2_done 已落盘 → 重启直达地图不重看
+	# 二：act2_done + l2_entry_done 已落盘 → 重启直达地图不重看
 	var main2: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport2 := _attach_scene(main2)
 	await process_frame
 	var map2 := main2.get_node("%MapPage") as Control
-	check(map2.visible and not (main2.get_node("%ProloguePage") as Control).visible, "act2_done 档：直达地图不重看")
-	check(main2.run.act2_done, "读档还原 act2_done")
+	check(map2.visible and not (main2.get_node("%ProloguePage") as Control).visible, "双门控档：直达地图不重看")
+	check(main2.run.act2_done and main2.run.l2_entry_done, "读档还原 act2_done + l2_entry_done")
 	viewport2.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.save_path = SaveGame.DEFAULT_SAVE_PATH
+	SaveGame.disabled = true
+
+
+func test_l2_entry_gating() -> void:
+	print("[第二层入场门控：仅 act2_done 档→补看全链；遭遇战失败原地重开；层中段旧档不补看（design-round12）]")
+	var path := "user://save_test_l2_entry.json"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.disabled = false
+	SaveGame.save_path = path
+	# 一：教程＋第二幕已过、入场未看 → 启动从 A 段补看全链
+	var run := RunState.new()
+	run.tutorial_done = true
+	run.act2_done = true
+	SaveGame.save_progress(run, CardPool.new())
+	var main1: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport1 := _attach_scene(main1)
+	await process_frame
+	var prologue1 := main1.get_node("%ProloguePage") as Control
+	var map1 := main1.get_node("%MapPage") as Control
+	check(prologue1.visible and not map1.visible, "仅 act2_done：启动补看第二层入场")
+	check((prologue1._text_label as Label).text.contains("映入眼帘的是一条公路"), "A 段首拍＝雾中公路开场")
+	var ambush: Variant = _enter_l2_ambush(main1)
+	await process_frame
+	check(ambush != null and ambush.state.mode == BattleState.Mode.AMBUSH, "A 段走完进遭遇战")
+	# 遭遇战失败＝原地重开本战（不重看 A 段）
+	ambush.state._damage_player(99)
+	check(ambush.state.phase == BattleState.Phase.DEFEAT, "遭遇战判负")
+	(ambush.get_node("%ContinueButton") as Button).pressed.emit()
+	check(main1._battle != null and main1._battle != ambush, "判负重开新遭遇战实例")
+	check(main1._battle.state.player_hp == BattleConfig.PLAYER_MAX_HP, "满血重开")
+	check(not prologue1.visible, "不重看 A 段演出")
+	await process_frame
+	# 胜→B 段→落地图；l2_entry_done 落盘后重启不重看
+	_drive_ambush_victory(main1._battle)
+	await process_frame
+	check(prologue1.visible, "遭遇战胜利接 B 段演出")
+	check((prologue1._text_label as Label).text.contains("懒惰的力量在手中汇聚"), "B 段首拍＝战后复盘")
+	_finish_l2_entry(main1)
+	await process_frame
+	check(main1.run.l2_entry_done and map1.visible, "B 段走完置位并落地图")
+	viewport1.queue_free()
+	await process_frame
+	# 二：重启直达地图（读档还原 l2_entry_done）
+	var main2: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport2 := _attach_scene(main2)
+	await process_frame
+	check((main2.get_node("%MapPage") as Control).visible and not (main2.get_node("%ProloguePage") as Control).visible, "重启直达地图不重看入场")
+	check(main2.run.l2_entry_done, "读档还原 l2_entry_done")
+	viewport2.queue_free()
+	await process_frame
+	# 三：旧档（无 l2_entry_done 键）已在层中段 → 不补看（防路线错位）
+	var legacy := RunState.new()
+	legacy.tutorial_done = true
+	legacy.act2_done = true
+	legacy.current_layer = LayerConfig.TUTORIAL_LAYER + 1
+	legacy.column_index = 1
+	legacy.chosen.append(0)
+	SaveGame.save_progress(legacy, CardPool.new())
+	var main3: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport3 := _attach_scene(main3)
+	await process_frame
+	check((main3.get_node("%MapPage") as Control).visible and not (main3.get_node("%ProloguePage") as Control).visible, "层中段旧档不补看入场（直接地图）")
+	check(not main3.run.l2_entry_done, "未补看：l2_entry_done 保持 false")
+	viewport3.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	SaveGame.save_path = SaveGame.DEFAULT_SAVE_PATH
@@ -3278,13 +3536,16 @@ func test_main_menu_practice_entry() -> void:
 
 
 func test_main_flow_layer2() -> void:
-	print("[第二层路线全流程：夹具选路（含死亡重掷）→ 层主战 → 上行 → 地图（第 3 层解锁）]")
+	print("[第二层路线全流程：夹具选路（含死亡重掷）→ 层主战前演出 → 层主战 → 上行 → 地图（第 3 层解锁）]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
 	var map_page := main.get_node("%MapPage") as Control
 	var event_page := main.get_node("%EventPage") as Control
 	var transition_page := main.get_node("%TransitionPage") as Control
 	var battle_host := main.get_node("%BattleHost") as Control
+	var prologue_page := main.get_node("%ProloguePage") as Control
+	var prologue_button := prologue_page._continue_button as Button
+	var prologue_text := prologue_page._text_label as Label
 	await process_frame
 	# 跳过教程（教程战已由主流程测试覆盖）：置教程完成＋注入夹具路线（层内流程走指定节点）＋固定随机源（死亡重掷断言可复现）
 	main.run.tutorial_done = true
@@ -3375,8 +3636,16 @@ func test_main_flow_layer2() -> void:
 	check(overlay.visible, "层主战也弹确认窗")
 	check(confirm_title.text == "进入「层主战·阿斯莫德」？", "层主战标题按节点")
 	confirm_primary.pressed.emit()
+	# 层主战前演出（design-round12）：确认后先演三拍再开战
+	check(prologue_page.visible and battle_host.get_child_count() == 0, "确认后先演战前演出（未开战）")
+	check(prologue_text.text.contains("橱窗"), "首拍＝去城堡路上（橱窗胡思乱想）")
+	prologue_button.pressed.emit()
+	check(prologue_text.text.contains("满血复活"), "第二拍＝菲戈蕾醒来撒娇")
+	prologue_button.pressed.emit()
+	check(prologue_text.text.contains("游戏开始咯") and prologue_button.text == "迎战", "末拍＝莉维娅（污染形态）飞出对峙")
+	prologue_button.pressed.emit()
 	await process_frame
-	check(battle_host.get_child_count() == 1, "层主战进入战斗位")
+	check(battle_host.get_child_count() == 1, "演出结束进入层主战")
 	var boss_battle: Variant = battle_host.get_child(0)
 	check(boss_battle.state.enemy_name == "阿斯莫德" and boss_battle.state.enemy_max_hp == 24, "层主按节点配置")
 	check(boss_battle.state.sin_card_id == "lust", "本场收下的罪卡＝色欲")
@@ -3536,6 +3805,7 @@ func test_save_roundtrip() -> void:
 	run.apply_hp_delta(-2)
 	run.apply_outcome({"block": 2, "draw": 1})
 	run.act2_done = true
+	run.l2_entry_done = true
 	var pool := CardPool.new()
 	pool.collect_sin("lust")
 	pool.add_to_deck("strike")
@@ -3556,16 +3826,19 @@ func test_save_roundtrip() -> void:
 	check(run2.pending_hp_delta == -2, "层内续航修正还原")
 	check(run2.pending_block == 2 and run2.pending_draw == 1, "下一战轻增益还原")
 	check(run2.act2_done, "第二幕标记还原")
-	# 旧档缺 pending 系列/act2_done 键：缺省 0/false（VERSION 2 加键向后兼容）
+	check(run2.l2_entry_done, "第二层入场标记还原")
+	# 旧档缺 pending 系列/act2_done/l2_entry_done 键：缺省 0/false（VERSION 2 加键向后兼容）
 	var legacy: Dictionary = data.duplicate(true)
 	legacy.erase("pending_hp_delta")
 	legacy.erase("pending_block")
 	legacy.erase("pending_draw")
 	legacy.erase("act2_done")
+	legacy.erase("l2_entry_done")
 	var run3 := RunState.new()
 	SaveGame.apply_progress(legacy, run3, CardPool.new())
 	check(run3.pending_hp_delta == 0 and run3.pending_block == 0 and run3.pending_draw == 0, "旧档缺 pending 键默认 0")
 	check(not run3.act2_done, "旧档缺 act2_done 默认 false（补看一次第二幕）")
+	check(not run3.l2_entry_done, "旧档缺 l2_entry_done 默认 false（补看一次入场）")
 	var battle_node: Dictionary = run2.route[0][1]
 	check(typeof(battle_node.get("enemy_hp")) == TYPE_INT, "节点血量回读为 int（JSON float 已归一）")
 	var enemy_deck: Dictionary = battle_node.get("enemy_deck", {})
@@ -3605,14 +3878,17 @@ func test_main_flow_save_resume() -> void:
 		(prologue1._continue_button as Button).pressed.emit()
 	check(main1.run.act2_done, "第二幕看完置位")
 	check(bool(SaveGame.load_progress().get("act2_done", false)), "act2_done 落盘")
+	check(prologue1.visible and (prologue1._text_label as Label).text.contains("映入眼帘的是一条公路"), "第二幕结束接第二层入场（design-round12）")
+	await _complete_l2_entry(main1)
+	check(main1.run.l2_entry_done and bool(SaveGame.load_progress().get("l2_entry_done", false)), "入场全链走完且 l2_entry_done 落盘")
 	viewport1.queue_free()
 	await process_frame
-	# 二：重启直达路线（跳过初幕与第二幕）
+	# 二：重启直达路线（跳过初幕、第二幕与入场演出）
 	var main2: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport2 := _attach_scene(main2)
 	await process_frame
 	var map2 := main2.get_node("%MapPage") as Control
-	check(map2.visible and not (main2.get_node("%ProloguePage") as Control).visible, "有档启动直达路线（第二幕不重看）")
+	check(map2.visible and not (main2.get_node("%ProloguePage") as Control).visible, "有档启动直达路线（第二幕/入场不重看）")
 	check(main2.run.tutorial_done and main2.run.companions.has("菲戈蕾"), "进度还原")
 	check(not (main2.get_node("%ConfirmOverlay") as Control).visible, "直达不出弹窗")
 	# 三：走一步（事件）→ 自动存盘 → 再重启续到第二列

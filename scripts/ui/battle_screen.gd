@@ -112,6 +112,8 @@ func _ready() -> void:
 		state.start_story(_deck, _stage, _entry_hp, _entry_block, _entry_draw)
 	elif _battle_mode == BattleState.Mode.TEACHING:
 		state.start_teaching()
+	elif _battle_mode == BattleState.Mode.AMBUSH:
+		state.start_ambush()
 	else:
 		state.start(_deck)
 	if state.sin_card_id != "":
@@ -677,6 +679,8 @@ func _load_sfx(sfx_name: String) -> AudioStream:
 func _turn_time_limit() -> float:
 	if _battle_mode == BattleState.Mode.TEACHING:
 		return BattleConfig.TEACHING_TURN_TIME_LIMIT
+	if _battle_mode == BattleState.Mode.AMBUSH:
+		return BattleConfig.AMBUSH_TURN_TIME_LIMIT
 	return BattleConfig.TURN_TIME_LIMIT
 
 

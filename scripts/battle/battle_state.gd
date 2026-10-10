@@ -2,8 +2,8 @@ class_name BattleState
 extends RefCounted
 
 enum Phase { PLAYER, STRIP, DEBRIEF, DEFEAT, ENDED }
-# TEACHING 追加在末尾：枚举值不做持久化，追加零风险
-enum Mode { TUTORIAL, PRACTICE, STORY, TEACHING }
+# TEACHING/AMBUSH 追加在末尾：枚举值不做持久化，追加零风险
+enum Mode { TUTORIAL, PRACTICE, STORY, TEACHING, AMBUSH }
 
 signal log_event(text: String)
 signal stats_changed()
@@ -122,6 +122,12 @@ func start_story(custom_deck: Array, stage: Dictionary, entry_hp := -1, entry_bl
 func start_teaching() -> void:
 	_stage = {}
 	_setup(Mode.TEACHING, [])
+
+
+# 笔筒污染体遭遇战（design-round12）：钉死牌组遭遇战，机制同教学战（不洗牌、不检定罪卡、每回合至多一张）
+func start_ambush() -> void:
+	_stage = {}
+	_setup(Mode.AMBUSH, [])
 
 
 func can_afford(card: CardData) -> bool:
@@ -365,6 +371,8 @@ func commit_staged() -> bool:
 				_end_teaching()
 			else:
 				_advance_wave()
+		elif mode == Mode.AMBUSH:
+			_end_ambush()
 		else:
 			_enter_strip()
 	else:
@@ -380,7 +388,11 @@ func gain_card(card: CardData) -> void:
 
 
 func hand_limit() -> int:
-	return BattleConfig.TEACHING_HAND_LIMIT if mode == Mode.TEACHING else BattleConfig.HAND_LIMIT
+	if mode == Mode.TEACHING:
+		return BattleConfig.TEACHING_HAND_LIMIT
+	if mode == Mode.AMBUSH:
+		return BattleConfig.AMBUSH_HAND_LIMIT
+	return BattleConfig.HAND_LIMIT
 
 
 # 教学战上限 10（摔伤 8 → 治疗回满 10）；常规战 20
@@ -486,6 +498,13 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 		sin_card_id = ""
 		strip_lines = []
 		purify_lines = []
+	elif mode == Mode.AMBUSH:
+		enemy_decl = [{"name": BattleConfig.AMBUSH_ENEMY_NAME, "hp": BattleConfig.AMBUSH_ENEMY_HP}]
+		enemy_deck_composition = BattleConfig.AMBUSH_ENEMY_DECK
+		is_boss = false
+		sin_card_id = ""
+		strip_lines = []
+		purify_lines = []
 	else:
 		enemy_decl = [{"name": BattleConfig.ENEMY_NAME, "hp": BattleConfig.ENEMY_MAX_HP}]
 		enemy_deck_composition = BattleConfig.ENEMY_DECK_COMPOSITION
@@ -535,16 +554,20 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 	if mode == Mode.TEACHING:
 		for line in BattleConfig.TEXT_TEACHING_START:
 			log_event.emit(line)
+	if mode == Mode.AMBUSH:
+		for line in BattleConfig.TEXT_AMBUSH_START:
+			log_event.emit(line)
 
 
 func _build_deck(custom_deck: Array) -> void:
 	draw_pile.clear()
 	hand.clear()
 	discard_pile.clear()
-	if mode == Mode.TEACHING:
-		# 教学牌组钉死：数组顺序＝摸牌顺序（反向入堆配合 pop_back），不洗牌、不检定罪卡
-		for i in range(BattleConfig.TEACHING_DECK.size() - 1, -1, -1):
-			draw_pile.append(CardDB.get_card(String(BattleConfig.TEACHING_DECK[i])))
+	if mode == Mode.TEACHING or mode == Mode.AMBUSH:
+		# 教学/遭遇战牌组钉死：数组顺序＝摸牌顺序（反向入堆配合 pop_back），不洗牌、不检定罪卡
+		var pinned: Array = BattleConfig.TEACHING_DECK if mode == Mode.TEACHING else BattleConfig.AMBUSH_DECK
+		for i in range(pinned.size() - 1, -1, -1):
+			draw_pile.append(CardDB.get_card(String(pinned[i])))
 		deck_sin_id = ""
 		return
 	if custom_deck.is_empty():
@@ -601,8 +624,12 @@ func _finish_round() -> void:
 
 
 func _gain_round_cards() -> void:
-	# 教学战沿用旧摸牌数：钉死牌序按 5＋3 水位编排（design/design-round9.md）
-	var gain := BattleConfig.TEACHING_ROUND_GAIN if mode == Mode.TEACHING else BattleConfig.ROUND_GAIN
+	# 教学战沿用旧摸牌数：钉死牌序按 5＋3 水位编排（design/design-round9.md）；遭遇战同为 3
+	var gain := BattleConfig.ROUND_GAIN
+	if mode == Mode.TEACHING:
+		gain = BattleConfig.TEACHING_ROUND_GAIN
+	elif mode == Mode.AMBUSH:
+		gain = BattleConfig.AMBUSH_ROUND_GAIN
 	var player_drawn := _draw_from(draw_pile, discard_pile, hand, gain)
 	log_event.emit(BattleConfig.TEXT_ROUND_GAIN_PLAYER % player_drawn)
 	if mode != Mode.PRACTICE:
@@ -661,7 +688,8 @@ func _enemy_turn() -> void:
 	if plays <= 0:
 		log_event.emit(BattleConfig.TEXT_ENEMY_IDLE % enemy_name)
 		return
-	if mode != Mode.TEACHING:
+	# 「她/它」占上风为层主战双名演出：教学战与污染体遭遇战无此形态
+	if mode != Mode.TEACHING and mode != Mode.AMBUSH:
 		if plays >= 2:
 			log_event.emit(BattleConfig.TEXT_ENEMY_DOMINANT)
 		else:
@@ -680,8 +708,8 @@ func _enemy_turn() -> void:
 func _decide_enemy_plays() -> int:
 	if debug_force_plays >= 0:
 		return min(debug_force_plays, enemy_hand.size())
-	if mode == Mode.TEACHING:
-		return min(1, enemy_hand.size())  # 教学战钉死每回合至多一张
+	if mode == Mode.TEACHING or mode == Mode.AMBUSH:
+		return min(1, enemy_hand.size())  # 教学战/遭遇战钉死每回合至多一张
 	return mini(randi_range(0, enemy_hand.size()), BattleConfig.ENEMY_MAX_PLAYS_PER_TURN)
 
 
@@ -842,6 +870,12 @@ func _advance_wave() -> void:
 func _end_teaching() -> void:
 	phase = Phase.ENDED
 	log_event.emit(BattleConfig.TEXT_TEACHING_WIN)
+	phase_changed.emit(phase)
+
+
+func _end_ambush() -> void:
+	phase = Phase.ENDED
+	log_event.emit(BattleConfig.TEXT_AMBUSH_WIN)
 	phase_changed.emit(phase)
 
 
