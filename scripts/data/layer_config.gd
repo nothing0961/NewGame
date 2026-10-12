@@ -59,11 +59,12 @@ const LAYER6_ENEMY_DECK := {"enemy_strike": 6, "piercing_light": 1, "falling_deb
 const LAYER7_ENEMY_DECK := {"enemy_strike": 5, "ember_lash": 2, "flame_burst": 1}
 
 # —— 第 2 层 · 色欲（池 9 ＝ 4 战 ＋ 5 事；节奏：一场不断挽留你的演出——雾越来越甜，直到歌忽然停下）——
+# 战斗名录＝design-round14 对齐正典重命名（迷雾公路→小镇橱窗→渐散的雾；数值/敌牌组不动）
 const LAYER2_BATTLES := [
-	{"type": "battle", "enemy": "粉雾歌者", "enemy_hp": 16, "enemy_deck": LAYER2_ENEMY_DECK},
-	{"type": "battle", "enemy": "糖丝傀儡", "enemy_hp": 18, "enemy_deck": LAYER2_ENEMY_DECK},
-	{"type": "battle", "enemy": "镜前舞者", "enemy_hp": 20, "enemy_deck": LAYER2_ENEMY_DECK},
-	{"type": "battle", "enemy": "缠丝泡影", "enemy_hp": 22, "enemy_deck": LAYER2_ENEMY_DECK},
+	{"type": "battle", "enemy": "雾中残响", "enemy_hp": 16, "enemy_deck": LAYER2_ENEMY_DECK},
+	{"type": "battle", "enemy": "橱窗巧偶", "enemy_hp": 18, "enemy_deck": LAYER2_ENEMY_DECK},
+	{"type": "battle", "enemy": "橱窗舞影", "enemy_hp": 20, "enemy_deck": LAYER2_ENEMY_DECK},
+	{"type": "battle", "enemy": "糖雾泡影", "enemy_hp": 22, "enemy_deck": LAYER2_ENEMY_DECK},
 ]
 
 const LAYER2_EVENTS := [
@@ -233,20 +234,14 @@ const LAYER2_BOSS := {
 	"enemy_hp": 24,
 	"enemy_deck": LAYER2_ENEMY_DECK,
 	"boss": true,
+	# 层主战本体三阶段（design-round14）：大炮拦截→传送破局→玩偶军队→遏制窗口（battle_state 按此键派发）
+	"phases": "l2_boss",
 	# 层主战前演出（design-round12）：先播 StoryBeats 拍表再开战（main_flow._enter_stage 派发）
 	"intro": "l2_boss",
 	"sin_card": "lust",
-	"strip_lines": [
-		"「呀……结束了呀。」她跌坐下去，粉色的裙摆散了一地。",
-		"一团泛着甜味的白光从她心口浮出来，垂在你们中间，像一颗舍不得化的糖。",
-		"它试探着凑近你——不像攻击，更像撒娇。",
-	],
-	"purify_lines": [
-		"莉维娅揉着额头坐起来，眼里的雾退了下去。",
-		"「原来你把它接住了。」她凑近看你手里的牌，忽然笑了。「它很粘人的，你辛苦啦。」",
-		"「找到我了。……谢谢。」她很小声地说，像是说给自己听。",
-		"她掂着裙角转了个圈。「这一层没意思了。走吧走吧——上边那位，比我难缠得多哦。」",
-	],
+	# 层主战收尾演出（design-round13）：清血后不经 STRIP/PURIFY，直入 OUTRO_A/B 拍表
+	# （main_flow._on_battle_ended 派发；末拍落账＝收下罪卡＋莉维娅同行）
+	"outro": "l2_boss",
 }
 
 # 层完成后的上行过渡读白（同行层主；净化后＝人身莉维娅）

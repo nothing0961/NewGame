@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "lazy_power"
+display_name = "懒惰的权能"
+kind = 2
+cost = 2
+text = "摧毁所有没有意识的敌人（玩偶、大炮这样的死物）。"
+flavor = "躺下，等等，躺下？"
+permanent = true
+effects = Array[Dictionary]([{
+"op": "sweep_inanimate"
+}])

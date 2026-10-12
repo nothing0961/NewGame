@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "teleport"
+display_name = "传送"
+kind = 2
+cost = 0
+text = "瞬移到敌后发动突袭：造成 4 点伤害（无视拦截），并摧毁所有大炮。"
+flavor = "贝嘉，可以传送……"
+permanent = true
+effects = Array[Dictionary]([{
+"op": "teleport_strike",
+"amount": 4
+}])

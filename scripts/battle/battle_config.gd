@@ -100,6 +100,54 @@ const TEXT_AMBUSH_START := [
 ]
 const TEXT_AMBUSH_WIN := "污染体散了架，身上的零件落了一地。"
 
+# —— L2 层主战三阶段（design-round14：欲望状态／大炮拦截／传送破局／玩偶军队／遏制窗口）——
+# stage 显式键 "phases":"l2_boss" 触发（不与 intro/outro 键耦合）：阶段1 大炮拦截（攻击全被抵消，
+# 仅「传送」可破局）→ 阶段2 玩偶军队（「懒惰的权能」清扫无意识死物）→ 阶段3 遏制窗口（她打偏
+# 一次后不再反击，受击 ×2 直到击杀）；清血后仍直入 OUTRO 收尾链（design-round13）。
+const L2_BOSS_PHASES := "l2_boss"
+# 与 LAYER2_BOSS.enemy_hp 保持同步；大炮为展示性 6 血（阶段1 攻击被拦截、只有传送能清）
+const L2_PHASE1_ENEMIES := [
+	{"name": "阿斯莫德", "hp": 24, "kind": "boss"},
+	{"name": "大炮", "hp": 6, "kind": "cannon", "inanimate": true},
+	{"name": "大炮", "hp": 6, "kind": "cannon", "inanimate": true},
+]
+const L2_PHASE1_DECK := {"cannon_barrage": 4, "desire_whisper": 4}
+const L2_PHASE2_DECK := {"puppet_attack": 5, "desire_whisper": 3}
+const L2_PHASE2_HAND := 4
+const L2_PUPPET_NAME := "玩偶"
+const L2_PUPPET_HP := 6
+const L2_PUPPET_COUNT := 3
+const L2_TELEPORT_DAMAGE := 4
+# 遏制窗口：开启后玩家对她的伤害翻倍（直到击杀）
+const L2_WINDOW_MULTIPLIER := 2
+# 战斗内赠送卡（直接入手，不入组牌链/仓库/存档扫描）；不可与其它牌叠合
+const L2_GRANTED_CARDS := ["teleport", "lazy_power"]
+# 欲望状态：回合开始失血＝层数；净化清除并本场免疫；上限 4 层
+const DESIRE_STACK_CAP := 4
+
+const TEXT_L2_PHASE1_START := [
+	"两门大炮架起来了——笔筒与圆形橡皮拼接的炮口，齐齐对着你。",
+	"『必须想办法破局。』——正面的攻击，都会被半路拦下。",
+]
+const TEXT_L2_TELEPORT_GRANT := "一股信息流入脑海——是菲戈蕾：「贝嘉，可以传送……」"
+const TEXT_L2_INTERCEPT := "莉维娅的魔炮将攻击抵消了！"
+const TEXT_L2_TELEPORT_STRIKE := "传送完成——你出现在莉维娅身后，魔力弹重重轰落。"
+const TEXT_L2_HURT := "「好疼！」"
+const TEXT_L2_WAND_DROP := "她灰头土脸地跌在地上，手里的魔杖脱手滚了出去。"
+const TEXT_L2_CANNONS_FALL := "两门大炮失去操控，散架成一地零件。"
+const TEXT_L2_PUPPETS_APPEAR := "「我生气了！」她小手一挥——小镇店铺里的玩偶和玩具都动了起来，身形放大，化成一支军队。"
+const TEXT_L2_LAZY_GRANT := "懒惰的权能浮上掌心——对没有意识的死物，它几乎不费力气。"
+const TEXT_L2_LAZY_SWEEP := "权能铺开——玩偶军队成片地躺倒下去，再没站起来。"
+const TEXT_L2_LAZY_NOOP := "权能铺开，周围已经没有能被它碰倒的死物了。"
+const TEXT_L2_WINDOW_MISS_1 := "魔力弹打偏了……轰倒了旁边的小屋。"
+const TEXT_L2_WINDOW_MISS_2 := "「没打中我，为什么？」"
+const TEXT_L2_WINDOW_IDLE := "莉维娅瘫坐在地，不再反击。"
+const TEXT_DESIRE_UP := "耳语贴了上来——欲望 +1 层。（现在 %d 层）"
+const TEXT_DESIRE_IMMUNE := "「%s」的耳语贴过来又滑开了——净化把你护在里面。"
+const TEXT_DESIRE_FULL := "欲望已经涨无可涨——它暂时停在了 %d 层。"
+const TEXT_DESIRE_TICK := "欲望侵蚀——你失去 %d 点生命。（生命 %d）"
+const TEXT_CLEANSE_DESIRE := "缠上来的欲望被冲散了。（清除 %d 层）"
+
 # 罪卡规则（design/design-round1.md §1）：任务达成或第 SIN_ROUND_FALLBACK 回合保底解锁；每场战斗仅出现并使用一次
 # 任务/保底参数按卡配置（design/design-round3.md §6：按牌组中的罪卡逐卡检定；
 # gluttony–anger 为 design-round8 先行版数值，待罪卡专轮替换）

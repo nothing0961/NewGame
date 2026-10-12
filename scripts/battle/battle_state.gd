@@ -53,6 +53,15 @@ var is_boss := true
 var sin_card_id := BattleConfig.SIN_CARD_ID
 var strip_lines: Array = BattleConfig.TEXT_STRIP
 var purify_lines: Array = BattleConfig.TEXT_PURIFY
+# 层主战收尾演出 id（design-round13）：非空＝清血后不经 STRIP/PURIFY，直入收尾链
+var outro_id := ""
+# L2 层主战三阶段（design-round14）：phases_id 非空触发；boss_phase 0=未启用/1=大炮拦截/2=玩偶军队/3=遏制窗口
+var phases_id := ""
+var boss_phase := 0
+var desire_stacks := 0
+# 遏制窗口：武装（玩偶清空）→开启（她打偏一次）；开启后她不再反击、受击伤害翻倍
+var _window_armed := false
+var _window_active := false
 var practice_end_text := BattleConfig.TEXT_PRACTICE_END
 
 var player_hp := 0
@@ -65,11 +74,11 @@ var turn_attack_bonus := 0  # 「弃掉：本回合伤害 +N」类效果，回�
 var enemy_suppressed := false
 var debug_force_plays := -1  # -1=随机出牌数, 0..n=强制出牌数（仅测试用）
 
-# 教学战状态：波次索引、睡意（到点未免疫则跳过一回合）、净化免疫
+# 教学战状态：波次索引、睡意（到点未免疫则跳过一回合）、净化免疫（design-round14 泛化为负面状态免疫）
 var teaching_wave_index := 0
 var pending_sleep := false
 var sleep_deadline_turn := 0
-var sleep_immune := false
+var status_immune := false
 
 var phase: int = Phase.PLAYER
 var draw_pile: Array[CardData] = []
@@ -219,6 +228,9 @@ func can_merge_with(card: CardData, staged_index: int) -> bool:
 		return false
 	if card.kind == CardData.Kind.SIN or card.kind == CardData.Kind.ENEMY or card.kind == CardData.Kind.AMPLIFY or card.kind == CardData.Kind.CORE:
 		return false
+	# 战斗内赠送卡（design-round14）：不可与其它牌叠合
+	if card.id in BattleConfig.L2_GRANTED_CARDS:
+		return false
 	var target: CardData = staged[staged_index]
 	if card.kind != target.kind:
 		return false
@@ -361,10 +373,11 @@ func commit_staged() -> bool:
 		else:
 			discard_pile.append(card)
 	_check_sin_unlock()
-	if _all_enemies_dead():
+	_check_phase3_window()
+	if _all_enemies_dead() or (phases_id == BattleConfig.L2_BOSS_PHASES and _boss_dead()):
 		if mode == Mode.PRACTICE:
 			_end_practice(true)
-		elif mode == Mode.STORY and not is_boss:
+		elif mode == Mode.STORY and (not is_boss or outro_id != ""):
 			_end_story_stage()
 		elif mode == Mode.TEACHING:
 			if teaching_wave_index >= BattleConfig.TEACHING_WAVES.size() - 1:
@@ -476,6 +489,7 @@ func finish_debrief() -> bool:
 
 func _setup(new_mode: int, custom_deck: Array) -> void:
 	mode = new_mode
+	phases_id = ""
 	var enemy_decl: Array = []
 	if mode == Mode.PRACTICE:
 		enemy_decl = [{"name": BattleConfig.PRACTICE_ENEMY_NAME, "hp": BattleConfig.PRACTICE_ENEMY_HP}]
@@ -484,13 +498,20 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 		sin_card_id = ""
 		strip_lines = []
 		purify_lines = []
+		outro_id = ""
 	elif mode == Mode.STORY:
+		phases_id = String(_stage.get("phases", ""))
 		enemy_decl = [{"name": String(_stage.get("enemy", "")), "hp": int(_stage.get("enemy_hp", BattleConfig.ENEMY_MAX_HP))}]
 		enemy_deck_composition = _stage.get("enemy_deck", {})
 		is_boss = bool(_stage.get("boss", false))
 		sin_card_id = String(_stage.get("sin_card", ""))
 		strip_lines = _stage.get("strip_lines", [])
 		purify_lines = _stage.get("purify_lines", [])
+		outro_id = String(_stage.get("outro", ""))
+		if phases_id == BattleConfig.L2_BOSS_PHASES:
+			# 层主战本体（design-round14）：阶段 1 大炮拦截开局——敌表与敌牌组整体覆盖
+			enemy_decl = BattleConfig.L2_PHASE1_ENEMIES
+			enemy_deck_composition = BattleConfig.L2_PHASE1_DECK
 	elif mode == Mode.TEACHING:
 		enemy_decl = []  # 波次敌人由 _spawn_wave 按 TEACHING_WAVES 建
 		enemy_deck_composition = BattleConfig.TEACHING_ENEMY_DECK
@@ -498,6 +519,7 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 		sin_card_id = ""
 		strip_lines = []
 		purify_lines = []
+		outro_id = ""
 	elif mode == Mode.AMBUSH:
 		enemy_decl = [{"name": BattleConfig.AMBUSH_ENEMY_NAME, "hp": BattleConfig.AMBUSH_ENEMY_HP}]
 		enemy_deck_composition = BattleConfig.AMBUSH_ENEMY_DECK
@@ -505,6 +527,7 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 		sin_card_id = ""
 		strip_lines = []
 		purify_lines = []
+		outro_id = ""
 	else:
 		enemy_decl = [{"name": BattleConfig.ENEMY_NAME, "hp": BattleConfig.ENEMY_MAX_HP}]
 		enemy_deck_composition = BattleConfig.ENEMY_DECK_COMPOSITION
@@ -512,13 +535,18 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 		sin_card_id = BattleConfig.SIN_CARD_ID
 		strip_lines = BattleConfig.TEXT_STRIP
 		purify_lines = BattleConfig.TEXT_PURIFY
+		outro_id = ""
 	enemies.clear()
 	for decl in enemy_decl:
-		enemies.append(_make_enemy(String(decl["name"]), int(decl["hp"])))
+		enemies.append(_make_enemy(String(decl["name"]), int(decl["hp"]), decl))
 	teaching_wave_index = 0
 	pending_sleep = false
 	sleep_deadline_turn = 0
-	sleep_immune = false
+	status_immune = false
+	boss_phase = 0
+	desire_stacks = 0
+	_window_armed = false
+	_window_active = false
 	if mode == Mode.TEACHING:
 		player_hp = BattleConfig.TEACHING_PLAYER_HP
 	elif mode == Mode.STORY and _entry_hp > 0:
@@ -549,6 +577,12 @@ func _setup(new_mode: int, custom_deck: Array) -> void:
 	_draw_from(draw_pile, discard_pile, hand, opening_draw)
 	if mode != Mode.PRACTICE:
 		_draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, BattleConfig.HAND_SIZE)
+	if phases_id == BattleConfig.L2_BOSS_PHASES:
+		# 阶段 1 开场（design-round14）：大炮架起＋赠送「传送」＝唯一破局
+		boss_phase = 1
+		for line in BattleConfig.TEXT_L2_PHASE1_START:
+			log_event.emit(line)
+		_grant_battle_card("teleport", BattleConfig.TEXT_L2_TELEPORT_GRANT)
 	_start_player_turn()
 	_apply_entry_buffs()
 	if mode == Mode.TEACHING:
@@ -666,6 +700,13 @@ func _start_player_turn() -> void:
 		pending_sleep = false
 		player_cost = 0
 		log_event.emit(BattleConfig.TEXT_SLEEP_SKIP)
+	# 欲望侵蚀（design-round14）：回合开始失血＝层数；失血判负则本回合不再推进
+	_apply_desire_tick()
+	if phase == Phase.DEFEAT:
+		return
+	# 阶段 1 防呆（design-round14）：手牌无「传送」则补发
+	if _phase1_active() and not _hand_has_id("teleport"):
+		_grant_battle_card("teleport", BattleConfig.TEXT_L2_TELEPORT_GRANT)
 	if mode == Mode.TEACHING:
 		_emit_teaching_turn_hint()
 	phase_changed.emit(phase)
@@ -676,6 +717,18 @@ func _start_player_turn() -> void:
 func _enemy_turn() -> void:
 	if mode == Mode.PRACTICE:
 		log_event.emit(BattleConfig.TEXT_PRACTICE_IDLE)
+		return
+	# 遏制窗口（design-round14）：武装→开启（她打偏一次、0 伤）；开启后不再反击
+	if _window_active:
+		log_event.emit(BattleConfig.TEXT_L2_WINDOW_IDLE)
+		return
+	if _window_armed:
+		_window_armed = false
+		_window_active = true
+		boss_phase = 3
+		enemy_suppressed = false
+		log_event.emit(BattleConfig.TEXT_L2_WINDOW_MISS_1)
+		log_event.emit(BattleConfig.TEXT_L2_WINDOW_MISS_2)
 		return
 	if mode == Mode.TEACHING and _all_enemies_sleeping():
 		log_event.emit(BattleConfig.TEXT_ENEMY_SLEEPING % enemy_name)
@@ -700,6 +753,10 @@ func _enemy_turn() -> void:
 		var card: CardData = enemy_hand.pop_back()
 		log_event.emit("%s打出「%s」。" % [enemy_name, card.display_name])
 		total_damage += _enemy_card_damage(card)
+		# 欲望低语（design-round14）：敌牌附加效果在伤害累计处逐张结算
+		for effect in card.effects:
+			if String(effect.get("op", "")) == "inflict_desire":
+				_apply_desire_stack(card.display_name)
 		enemy_discard_pile.append(card)
 	if total_damage > 0:
 		_damage_player(total_damage)
@@ -725,16 +782,20 @@ func _enemy_card_damage(card: CardData) -> int:
 func _apply_effect(effect: Dictionary, card_name: String, via_discard := false) -> void:
 	match String(effect.get("op", "")):
 		"deal_damage":
-			var damage: int = int(effect.get("amount", 0)) + attack_bonus + turn_attack_bonus
-			if String(effect.get("target", "")) == "all":
-				for enemy in enemies:
-					if int(enemy["hp"]) <= 0:
-						continue
-					_damage_enemy(enemy, damage, effect)
+			# 大炮拦截（design-round14 阶段1）：玩家攻击全被抵消——「传送」走独立 op 不经此门
+			if _phase1_active():
+				log_event.emit(BattleConfig.TEXT_L2_INTERCEPT)
 			else:
-				var target_index := _active_enemy_index()
-				if target_index >= 0:
-					_damage_enemy(enemies[target_index], damage, effect)
+				var damage: int = int(effect.get("amount", 0)) + attack_bonus + turn_attack_bonus
+				if String(effect.get("target", "")) == "all":
+					for enemy in enemies:
+						if int(enemy["hp"]) <= 0:
+							continue
+						_damage_enemy(enemy, damage, effect)
+				else:
+					var target_index := _active_enemy_index()
+					if target_index >= 0:
+						_damage_enemy(enemies[target_index], damage, effect)
 		"heal":
 			var heal_amount: int = int(effect.get("amount", 0))
 			var healed: int = mini(heal_amount, player_max_hp() - player_hp)
@@ -744,7 +805,10 @@ func _apply_effect(effect: Dictionary, card_name: String, via_discard := false) 
 			else:
 				log_event.emit("生命已经满了，没有恢复的必要。")
 		"cleanse":
-			sleep_immune = true
+			status_immune = true
+			if desire_stacks > 0:
+				log_event.emit(BattleConfig.TEXT_CLEANSE_DESIRE % desire_stacks)
+				desire_stacks = 0
 			if pending_sleep:
 				pending_sleep = false
 				log_event.emit(BattleConfig.TEXT_CLEANSE_SLEEP)
@@ -779,6 +843,28 @@ func _apply_effect(effect: Dictionary, card_name: String, via_discard := false) 
 			var draw_count: int = int(effect.get("amount", 0))
 			var drawn: int = _draw_from(draw_pile, discard_pile, hand, draw_count)
 			log_event.emit("你抽了 %d 张牌。" % drawn)
+		"teleport_strike":
+			# 「传送」破局（design-round14）：阶段 1 直达层主本体；脱离阶段 1 后降级为普通 4 伤
+			var strike: int = int(effect.get("amount", BattleConfig.L2_TELEPORT_DAMAGE))
+			if _phase1_active():
+				_l2_teleport_breakthrough(strike)
+			else:
+				var boss_index := _boss_index()
+				if boss_index >= 0 and not _boss_dead():
+					_damage_enemy(enemies[boss_index], strike, {})
+		"sweep_inanimate":
+			# 「懒惰的权能」（design-round14）：对无意识死物（大炮/玩偶）全体清除
+			var swept := 0
+			for enemy in enemies:
+				if bool(enemy.get("inanimate", false)) and int(enemy["hp"]) > 0:
+					enemy["hp"] = 0
+					swept += 1
+			if swept > 0:
+				log_event.emit(BattleConfig.TEXT_L2_LAZY_SWEEP)
+			else:
+				log_event.emit(BattleConfig.TEXT_L2_LAZY_NOOP)
+		"inflict_desire":
+			_apply_desire_stack(card_name)
 
 
 func _damage_player(amount: int) -> void:
@@ -829,8 +915,13 @@ func _end_story_stage() -> void:
 	phase_changed.emit(phase)
 
 
-func _make_enemy(name: String, hp: int) -> Dictionary:
-	return {"name": name, "hp": hp, "max_hp": hp, "sleeping": false}
+func _make_enemy(name: String, hp: int, extra: Dictionary = {}) -> Dictionary:
+	var enemy := {"name": name, "hp": hp, "max_hp": hp, "sleeping": false}
+	for key in extra:
+		if key == "name" or key == "hp":
+			continue
+		enemy[key] = extra[key]
+	return enemy
 
 
 # 对单个敌人结算伤害：bonus_vs="sleeping" 时对沉睡目标追加 bonus（强欲魔弹追伤）
@@ -838,6 +929,9 @@ func _damage_enemy(enemy: Dictionary, base_damage: int, effect: Dictionary) -> v
 	var damage := base_damage
 	if String(effect.get("bonus_vs", "")) == "sleeping" and bool(enemy.get("sleeping", false)):
 		damage += int(effect.get("bonus", 0))
+	# 遏制窗口（design-round14）：开启后玩家对她的伤害翻倍，直到击杀
+	if _window_active and String(enemy.get("kind", "")) == "boss":
+		damage *= BattleConfig.L2_WINDOW_MULTIPLIER
 	enemy["hp"] = max(0, int(enemy["hp"]) - damage)
 	log_event.emit("%s受到 %d 点伤害。" % [String(enemy["name"]), damage])
 
@@ -877,6 +971,110 @@ func _end_ambush() -> void:
 	phase = Phase.ENDED
 	log_event.emit(BattleConfig.TEXT_AMBUSH_WIN)
 	phase_changed.emit(phase)
+
+
+# —— L2 层主战三阶段机制（design-round14）——
+
+func _phase1_active() -> bool:
+	return phases_id == BattleConfig.L2_BOSS_PHASES and boss_phase == 1
+
+
+func _boss_index() -> int:
+	for i in enemies.size():
+		if String(enemies[i].get("kind", "")) == "boss":
+			return i
+	return -1
+
+
+func _boss_dead() -> bool:
+	var index := _boss_index()
+	return index >= 0 and int(enemies[index]["hp"]) <= 0
+
+
+func _alive_inanimate_count() -> int:
+	var count := 0
+	for enemy in enemies:
+		if bool(enemy.get("inanimate", false)) and int(enemy["hp"]) > 0:
+			count += 1
+	return count
+
+
+func _hand_has_id(card_id: String) -> bool:
+	for card in hand:
+		if card.id == card_id:
+			return true
+	return false
+
+
+# 战斗内赠送卡（design-round14）：直接入手，不入组牌链/仓库/存档扫描
+func _grant_battle_card(card_id: String, line: String) -> void:
+	if line != "":
+		log_event.emit(line)
+	gain_card(CardDB.get_card(card_id))
+
+
+# 阶段转场换敌牌组：清三堆→按 comp 装填→洗牌→摸手牌
+func _rebuild_enemy_piles(composition: Dictionary, hand_count: int) -> void:
+	enemy_deck_composition = composition
+	enemy_draw_pile.clear()
+	enemy_hand.clear()
+	enemy_discard_pile.clear()
+	for card_id in composition:
+		for _i in composition[card_id]:
+			enemy_draw_pile.append(CardDB.get_card(card_id))
+	enemy_draw_pile.shuffle()
+	_draw_from(enemy_draw_pile, enemy_discard_pile, enemy_hand, hand_count)
+
+
+# 传送破局（design-round14）：直达层主本体→大炮散架→玩偶军队登场＋赠送「懒惰的权能」
+func _l2_teleport_breakthrough(amount: int) -> void:
+	log_event.emit(BattleConfig.TEXT_L2_TELEPORT_STRIKE)
+	var boss_index := _boss_index()
+	if boss_index >= 0:
+		_damage_enemy(enemies[boss_index], amount, {})
+	log_event.emit(BattleConfig.TEXT_L2_HURT)
+	log_event.emit(BattleConfig.TEXT_L2_WAND_DROP)
+	for i in range(enemies.size() - 1, -1, -1):
+		if String(enemies[i].get("kind", "")) == "cannon":
+			enemies.remove_at(i)
+	log_event.emit(BattleConfig.TEXT_L2_CANNONS_FALL)
+	boss_phase = 2
+	_rebuild_enemy_piles(BattleConfig.L2_PHASE2_DECK, BattleConfig.L2_PHASE2_HAND)
+	for _i in BattleConfig.L2_PUPPET_COUNT:
+		enemies.append(_make_enemy(BattleConfig.L2_PUPPET_NAME, BattleConfig.L2_PUPPET_HP, {"kind": "puppet", "inanimate": true}))
+	log_event.emit(BattleConfig.TEXT_L2_PUPPETS_APPEAR)
+	_grant_battle_card("lazy_power", BattleConfig.TEXT_L2_LAZY_GRANT)
+
+
+# 遏制窗口（design-round14）：玩偶清空且层主存活 → 武装（下次敌方回合打偏一次）
+func _check_phase3_window() -> void:
+	if boss_phase != 2 or _window_armed or _window_active:
+		return
+	if _boss_dead() or _alive_inanimate_count() > 0:
+		return
+	_window_armed = true
+
+
+# 欲望状态（design-round14）：敌方「欲望低语」施加＋1（免疫时滑开；上限 4 层）
+func _apply_desire_stack(card_name: String) -> void:
+	if status_immune:
+		log_event.emit(BattleConfig.TEXT_DESIRE_IMMUNE % card_name)
+		return
+	if desire_stacks >= BattleConfig.DESIRE_STACK_CAP:
+		log_event.emit(BattleConfig.TEXT_DESIRE_FULL % desire_stacks)
+		return
+	desire_stacks += 1
+	log_event.emit(BattleConfig.TEXT_DESIRE_UP % desire_stacks)
+
+
+# 欲望状态：回合开始失血＝层数（绕过格挡）
+func _apply_desire_tick() -> void:
+	if desire_stacks <= 0:
+		return
+	player_hp = max(0, player_hp - desire_stacks)
+	log_event.emit(BattleConfig.TEXT_DESIRE_TICK % [desire_stacks, player_hp])
+	if player_hp <= 0:
+		_handle_defeat()
 
 
 func _all_enemies_dead() -> bool:

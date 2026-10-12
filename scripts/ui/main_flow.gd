@@ -31,6 +31,8 @@ var _practice_return: Callable = Callable()
 var _performance_next: Callable = Callable()
 var _battle_context := ""  # "tutorial" / "story" / "practice" / "teaching" / "ambush"
 var _battle: Control = null
+# 当前层战斗节点（design-round13）：收尾演出派发读其 outro/sin_card 键
+var _current_stage: Dictionary = {}
 # 确认窗待定节点：点节点只备忘，确认主按钮才 choose 落账（design-round5.md §0.4）
 var _pending_node_index := -1
 var _pending_stage: Dictionary = {}
@@ -215,6 +217,7 @@ func _start_story_battle(stage: Dictionary) -> void:
 	if pool.is_deck_valid():
 		deck = pool.deck.duplicate()
 	_battle_context = "story"
+	_current_stage = stage
 	# 轻增益（design-round10 §4）：story 开局读取并即刻消费；教学/练习/教程战不传不消耗
 	_start_battle(BattleState.Mode.STORY, deck, stage, run.entry_hp(), run.entry_block(), run.entry_draw())
 	run.consume_buffs()
@@ -278,6 +281,9 @@ func _on_battle_ended(practice: bool) -> void:
 	elif _battle_context == "ambush":
 		# 遭遇战胜＝接 B 段演出（design-round12）；不入层账、不收集
 		_show_l2_entry_after()
+	elif String(_current_stage.get("outro", "")) != "":
+		# 层主战收尾演出（design-round13）：outro 键在场 → 不落账，直入收尾链（末拍统一落账）
+		_start_story_outro()
 	else:
 		_finish_story_stage(collected)
 
@@ -324,6 +330,30 @@ func _finish_story_stage(collected: Array[String]) -> void:
 	if not collected.is_empty():
 		run.add_companion(LayerConfig.companion_name(run.current_layer))
 	_after_route_step()
+
+
+# 层主战收尾链（design-round13）：OUTRO_A（「动手」）→ OUTRO_B（「继续」）→ 原子落账（收下罪卡＋同行）
+func _start_story_outro() -> void:
+	var tables: Array = StoryBeats.outro_beats(String(_current_stage.get("outro", "")))
+	if tables.size() != 2:
+		var empty: Array[String] = []
+		_finish_story_stage(empty)
+		return
+	_show_performance(tables[0], _on_story_outro_a_finished.bind(tables[1]))
+
+
+func _on_story_outro_a_finished(table_b: Array) -> void:
+	_show_performance(table_b, _on_story_outro_finished)
+
+
+func _on_story_outro_finished() -> void:
+	var collected: Array[String] = []
+	var sin_id := String(_current_stage.get("sin_card", ""))
+	if sin_id != "":
+		run.collect_sin(sin_id)
+		pool.collect_sin(sin_id)
+		collected.append(sin_id)
+	_finish_story_stage(collected)
 
 
 func _on_battle_lost() -> void:

@@ -187,6 +187,11 @@ func _sync_ui() -> void:
 		block_line += "　攻击 +%d" % state.attack_bonus
 	if state.turn_attack_bonus > 0:
 		block_line += "　本回合攻击 +%d" % state.turn_attack_bonus
+	# 欲望状态/负面免疫（design-round14）
+	if state.desire_stacks > 0:
+		block_line += "　欲望 %d 层" % state.desire_stacks
+	if state.status_immune:
+		block_line += "　负面免疫"
 	player_block_label.text = block_line
 	hand_count_label.text = "手牌 %d/%d" % [state.hand.size(), state.hand_limit()]
 	if state.hand.size() >= state.hand_limit():

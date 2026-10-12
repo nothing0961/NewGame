@@ -352,3 +352,163 @@ const INTRO_TABLES := {"l2_boss": L2_BOSS_INTRO}
 static func intro_beats(intro_id: String) -> Array:
 	var beats: Array = INTRO_TABLES.get(intro_id, [])
 	return beats
+
+# L2 层主战收尾 A（design-round13）：清血后直入——战斗过程（魔炮连射→大炮→传送破局→玩偶军队→故意打偏）→「动手」
+const L2_BOSS_OUTRO_A := [
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia_corrupt",
+		"speaker": "莉维娅",
+		"text": "莉维娅不断发射粉色的魔炮攻击贝嘉，但都被贝嘉用灵活的走位躲避。\n\n「真拿你没办法，那就再多一些！」",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia_corrupt",
+		"speaker": "莉维娅",
+		"text": "莉维娅拍了拍手，身后的城堡内部，钻出了两门「大炮」——由笔筒和圆形橡皮拼接而成，形似大炮的东西。\n\n「发射！」\n\n莉维娅一声令下，那两门大炮也开始朝贝嘉所在的位置发射粉色魔炮。\n\n魔法弹幕一下子变得密集了起来，贝嘉的走位开始变得乏力。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "",
+		"speaker": "",
+		"text": "『必须想办法破局。』\n\n要击败莉维娅，一直这样躲下去可不是办法，得先想办法把那两门炮给破坏掉。\n\n至于为什么不是直接攻击莉维娅，很明显，定靶总是比动靶要好打得多的。\n\n贝嘉开始一边走位一边尝试用魔炮去破坏大炮，但难受的是，每次魔炮快命中大炮时就会被莉维娅发射的魔炮给抵消掉。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "figelie",
+		"speaker": "菲戈蕾",
+		"text": "就在贝嘉一筹莫展之际，身后一直被无视，没有被攻击的菲戈蕾开口了。\n\n「贝嘉，可以传送……」\n\n随后一股信息就流入了贝嘉的脑海里，似乎是菲戈蕾自己的魔法，可以将某个物体进行短距离的传送，现在只要贝嘉在心里发出指令，菲戈蕾就会发动魔法进行传送。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "figelie",
+		"speaker": "",
+		"text": "贝嘉一边躲避一边进行魔炮蓄力，等到魔炮蓄力完毕的时候，她抓住莉维娅攻击的后摇。\n\n『把我传送到莉维娅身后。』\n\n菲戈蕾点了点头。\n\n「传送，准备……」\n\n下一刻，贝嘉就瞬移到了莉维娅的身后，蓄力已久的魔炮倾泻而出，巨大的能量裹挟着莉维娅，将她狠狠轰击在地上。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia_corrupt",
+		"speaker": "莉维娅",
+		"text": "「好疼！」\n\n莉维娅被砸到地面上，扬起一片尘土，她也被溅起的沙尘整得灰头土脸的，她的手已经拿不稳东西了，粉色的魔杖也掉在了地上。\n\n「浑身都弄脏了……我生气了！」",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "",
+		"speaker": "",
+		"text": "莉维娅浑身颤抖，然后小手一挥，只见小镇店铺里的各种玩偶和玩具都开始动了起来，身形放大，然后化作一支军队开始向贝嘉这里移动。\n\n这下菲戈蕾也无法蓄力空间魔法了，局势似乎又开始变得被动起来。\n\n看着迫近的怪海，贝嘉感受到了人数差带来的绝望。\n\n「这么多怪物，将它们清理完我也得躺地上了吧……」\n\n「躺下，等等，躺下？」\n\n贝嘉似乎想到了什么。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "",
+		"speaker": "",
+		"text": "她发动了懒惰的权能，可能是因为那些玩偶和玩具化作的怪物是没有意识的死物，所以贝嘉的权能没费多少力气就生效了。\n\n乌泱泱的怪海开始成片地倒下。\n\n「怎么会、怎么会……？」莉维娅嘴上不停喃喃。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia_corrupt",
+		"speaker": "莉维娅",
+		"text": "贝嘉扭过头，准备发动对莉维娅的最终一击。\n\n但莉维娅出手比她更快。\n\n她抬起手来，魔力弹早已在掌心汇聚完毕。\n\n——这个距离，躲不开。\n\n而远处的菲戈蕾还没有完成下一次空间魔法的蓄力。\n\n莉维娅冷笑，发表了胜利宣言。\n\n「对不起，但好像还是我技高一筹呢！」",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "",
+		"speaker": "",
+		"text": "随后莉维娅手一偏，魔力弹发射而出，强大的威力轰倒了一大片的房子。\n\n『没打中我，为什么？』\n\n莉维娅瘫坐在地。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia_corrupt",
+		"speaker": "",
+		"text": "「那么，快动手吧。」\n\n「没事的，我不怕疼的，趁现在我能控制住自己，快行动！」\n\n贝嘉怔了怔，然后了然，这是莉维娅暂时清醒过来的意识压制住了被污染的她自己。\n\n「我知道了，那我要动手咯？」",
+		"button_label": "动手",
+	},
+]
+
+# L2 层主战收尾 B（design-round13）：脑瓜崩净化→哭泣戏（「我们会爱你的。」）→「第二幕，完」
+const L2_BOSS_OUTRO_B := [
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia_corrupt",
+		"speaker": "",
+		"text": "魔力在贝嘉的手上汇聚，她蹲下身子，将手放在了莉维娅的脑门前。\n\n莉维娅虽然嘴上说不怕疼，但还是害怕地闭上了眼睛。\n\n于是贝嘉赏了莉维娅一个脑瓜崩。\n\n莉维娅身上最后的一丝污染也被清除完毕。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia",
+		"speaker": "莉维娅",
+		"text": "「……好疼！」莉维娅捂住额头。\n\n「噗呲。」莉维娅突然笑了起来，她将头埋进了贝嘉的怀里，身子因为笑而颤抖着。\n\n「我们成功了！我们成功了！」",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia",
+		"speaker": "莉维娅",
+		"text": "笑着笑着，一滴泪水滴在了贝嘉身上，紧接着，莉维娅停止了发笑，开始小声抽泣。\n\n「对不起……我差点害你们迷失……对不起……我差点杀死你们……对不起……我不是一个好的向导……对不起……我又辜负了大家的期望……对不起……我不是受人喜爱的孩子……对不起对不起对不起。」",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia",
+		"speaker": "",
+		"text": "莉维娅的身子一抽一抽的，她似乎察觉到了自己现在的失态，她赶忙从贝嘉的怀里抬起头来，用一双小手不停地扒拉自己的泪水，似乎想要用这种方法让自己停止哭泣的行为。\n\n「对不起，我把你的衣服弄脏了，我……」话还没说完，莉维娅再度被贝嘉拥入怀中。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia",
+		"speaker": "",
+		"text": "贝嘉用手一遍又一遍地，轻轻抚摸莉维娅的背，尝试让莉维娅感到安心——就像之前莉维娅让贝嘉感到安心一样。\n\n「没事的，这里已经没有人会在怪着你了，我们会爱你的。」\n\n「莉维娅。」",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "livia",
+		"speaker": "",
+		"text": "莉维娅再也控制不住自己的情绪，她紧紧拥抱贝嘉，放声大哭。\n\n被欲望污染的小女孩，最渴望的是什么呢？\n\n可能是爱吧（笑）。",
+		"button_label": "继续",
+	},
+	{
+		"bg": "bg_castle",
+		"bg_color": Color(0.21, 0.16, 0.20),
+		"portrait": "",
+		"speaker": "",
+		"text": "第二幕，完",
+		"button_label": "继续",
+	},
+]
+
+# 层主战收尾派发表（design-round13）：layer_config 的 stage 节点用 "outro" 键引用 id。
+# 未知 id／空表 → outro_beats() 返回空数组，调用方（main_flow._start_story_outro）回退为直接落账收尾。
+const OUTRO_TABLES := {"l2_boss": [L2_BOSS_OUTRO_A, L2_BOSS_OUTRO_B]}
+
+static func outro_beats(outro_id: String) -> Array:
+	var beats: Array = OUTRO_TABLES.get(outro_id, [])
+	return beats

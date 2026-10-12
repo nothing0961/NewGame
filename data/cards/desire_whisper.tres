@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="CardData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = "desire_whisper"
+display_name = "欲望低语"
+kind = 3
+cost = 1
+text = "造成 1 点伤害，并施加 1 层欲望。"
+flavor = ""
+permanent = false
+effects = Array[Dictionary]([{
+"op": "deal_damage",
+"amount": 1
+}, {
+"op": "inflict_desire",
+"amount": 1
+}])

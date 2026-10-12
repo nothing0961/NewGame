@@ -51,15 +51,23 @@ func _initialize() -> void:
 	test_teaching_battle_logic()
 	test_teaching_sleep_timeout()
 	test_ambush_battle_logic()
+	test_l2_phase_data()
+	test_l2_boss_phases()
+	test_l2_teleport()
+	test_l2_window_mechanics()
+	test_l2_win_special_case()
+	test_l2_desire_system()
 	# 等一帧让 SceneTree 进入运行态，节点加入 root 时 _ready 才会立即执行
 	await process_frame
 	await test_battle_scene_tutorial()
 	await test_battle_scene_practice()
 	await test_teaching_battle_scene()
 	await test_ambush_battle_scene()
+	await test_l2_boss_scene()
 	await test_prologue_page()
 	await test_story_beats()
 	await test_story_beats_l2()
+	await test_story_beats_l2_outro()
 	await test_battle_scene_defeat()
 	await test_map_page()
 	await test_map_route_scroll()
@@ -241,8 +249,8 @@ func _route_signature(route: Array) -> String:
 # 随机性由 test_layer_data 的生成器测试单独覆盖
 func _fixture_route() -> Array:
 	return [
-		[_pool_event("试衣镜"), _pool_battle("粉雾歌者"), _pool_event("糖果摊")],
-		[_pool_battle("糖丝傀儡"), _pool_event("合唱席")],
+		[_pool_event("试衣镜"), _pool_battle("雾中残响"), _pool_event("糖果摊")],
+		[_pool_battle("橱窗巧偶"), _pool_event("合唱席")],
 		[LayerConfig.LAYER2_BOSS],
 	]
 
@@ -465,6 +473,16 @@ func _drive_ambush_victory(battle: Variant) -> void:
 	state.commit_staged()
 	state.stage_card(_find_card(state.hand, "strike"))
 	state.commit_staged()
+
+
+# L2 层主战三阶段驱动（design-round14）：传送破局（阶段 1 魔弹全被拦截）→ 权能清玩偶 →
+# 遏制窗口武装 → 敌回打偏开启 → 窗口×2 击杀（本体死即胜）；敌回零出牌保证驱动不受随机干扰
+func _drive_l2_boss_victory(state: BattleState) -> void:
+	state.debug_force_plays = 0
+	var safety := 0
+	while state.phase == BattleState.Phase.PLAYER and safety < 60:
+		safety += 1
+		_turn_cycle(state, ["teleport", "lazy_power", "strike", "heavy_strike", "guard"])
 
 
 # B 段 8 拍推进 → 落地图（l2_entry_done 置位＋落盘）
@@ -1372,7 +1390,7 @@ func test_layer_data() -> void:
 	check(run.node_state(0, 2) == RunState.NodeState.DONE, "已走节点＝已走")
 	check(run.node_state(0, 0) == RunState.NodeState.MISSED, "同列未选＝错失")
 	check(run.node_state(1, 1) == RunState.NodeState.CURRENT, "第二列当前可选")
-	check(String(run.choose(0).get("enemy", "")) == "糖丝傀儡", "第二列选作战节点")
+	check(String(run.choose(0).get("enemy", "")) == "橱窗巧偶", "第二列选作战节点")
 	check(not run.is_route_finished(), "还剩层主战")
 	check(run.choose(0).get("boss", false), "第三列选层主战")
 	check(run.is_route_finished(), "路线走完")
@@ -1520,7 +1538,7 @@ func test_event_games_data() -> void:
 
 # 各层层主三键守护（STRIP 死锁防线）：sin_card/strip_lines/purify_lines 必填、罪卡可载入
 func test_layer_bosses_complete() -> void:
-	print("[各层层主：三键必填（STRIP 死锁防线）/ 恶魔名 / 罪卡可载入]")
+	print("[各层层主：三键必填（STRIP 死锁防线）/ 恶魔名 / 罪卡可载入；L2 走收尾演出（design-round13）]")
 	var sin_by_layer := {2: "lust", 3: "gluttony", 4: "greed", 5: "envy", 6: "pride", 7: "anger"}
 	for layer in range(2, LayerConfig.LAST_PLAYABLE_LAYER + 1):
 		var boss: Dictionary = LayerConfig.LAYER_BOSSES[layer]
@@ -1531,10 +1549,15 @@ func test_layer_bosses_complete() -> void:
 		check(sin_id == sin_by_layer[layer], "第 %d 层收下罪卡＝%s" % [layer, sin_by_layer[layer]])
 		var sin_card := CardDB.get_card(sin_id)
 		check(sin_card != null and sin_card.kind == CardData.Kind.SIN, "第 %d 层罪卡数据可载入" % layer)
-		# L2 保留既有文案（净化 3 行）；L3–7 为本轮新写（净化 4 行）
-		var purify_min := 4 if layer >= 3 else 3
-		check((boss.get("strip_lines", []) as Array).size() >= 3, "第 %d 层剥污染读白 ≥3 行" % layer)
-		check((boss.get("purify_lines", []) as Array).size() >= purify_min, "第 %d 层净化读白 ≥%d 行" % [layer, purify_min])
+		# L2 收尾演出接管（design-round13）：outro 键在场、STRIP/PURIFY 占位退役；L3–7 三键必填
+		if layer == 2:
+			check(String(boss.get("outro", "")) == "l2_boss", "第 2 层层主节点带 outro 键（收尾演出）")
+			check(String(boss.get("phases", "")) == "l2_boss", "第 2 层层主节点带 phases 键（三阶段机制，design-round14）")
+			check((boss.get("strip_lines", []) as Array).is_empty() and (boss.get("purify_lines", []) as Array).is_empty(), "第 2 层无 STRIP/PURIFY 占位读白")
+		else:
+			check(String(boss.get("phases", "")) == "", "第 %d 层层主无 phases 键（三阶段仅 L2）" % layer)
+			check((boss.get("strip_lines", []) as Array).size() >= 3, "第 %d 层剥污染读白 ≥3 行" % layer)
+			check((boss.get("purify_lines", []) as Array).size() >= 4, "第 %d 层净化读白 ≥4 行" % layer)
 
 
 # 先行版罪卡数据（design-round8；各具特色，待罪卡专轮替换）：cost 6 / 永久 / 效果与任务参数
@@ -1595,10 +1618,10 @@ func test_entry_hp_modifier() -> void:
 	run.reset_layer()
 	check(run.pending_hp_delta == 0 and run.entry_hp() == BattleConfig.PLAYER_MAX_HP, "死亡重掷/层完成清零")
 	var state := BattleState.new()
-	state.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("粉雾歌者"), 8)
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("雾中残响"), 8)
 	check(state.player_hp == 8, "start_story 带伤入场（8/10）")
 	var state2 := BattleState.new()
-	state2.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("粉雾歌者"))
+	state2.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("雾中残响"))
 	check(state2.player_hp == BattleConfig.PLAYER_MAX_HP, "start_story 默认满血入场")
 
 
@@ -1627,9 +1650,9 @@ func test_story_battle_small() -> void:
 	var logs: Array = []
 	var state := BattleState.new()
 	state.log_event.connect(func(text: String) -> void: logs.append(text))
-	state.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("粉雾歌者"))
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], _pool_battle("雾中残响"))
 	check(state.mode == BattleState.Mode.STORY, "层战模式")
-	check(state.enemy_name == "粉雾歌者" and state.enemy_max_hp == 16, "对手与血量按关卡配置")
+	check(state.enemy_name == "雾中残响" and state.enemy_max_hp == 16, "对手与血量按关卡配置")
 	check(not state.is_boss, "小怪战非层主")
 	check(state.sin_card_id == "", "小怪战无收下环节")
 	state.debug_force_plays = 0
@@ -1643,7 +1666,7 @@ func test_story_battle_small() -> void:
 
 
 func test_story_battle_boss() -> void:
-	print("[层战·层主：胜利走净化与收下，罪卡按关卡]")
+	print("[层战·层主：L2 三阶段（design-round14）清血直入结束（design-round13：不过净化，收尾演出接管）；牌组罪卡检定]")
 	var logs: Array = []
 	var state := BattleState.new()
 	state.log_event.connect(func(text: String) -> void: logs.append(text))
@@ -1652,18 +1675,23 @@ func test_story_battle_boss() -> void:
 	check(state.enemy_name == "阿斯莫德" and state.enemy_max_hp == 24, "层主名与血量按关卡")
 	check(state.is_boss, "层主战")
 	check(state.sin_card_id == "lust", "本场收下的罪卡＝色欲")
-	check(String(state.strip_lines[0]).contains("粉色的裙摆"), "净化时刻读白按关卡")
-	state.debug_force_plays = 0
-	var safety := 0
-	while state.phase == BattleState.Phase.PLAYER and safety < 120:
-		safety += 1
-		_turn_cycle(state, ["strike"])
-	check(state.phase == BattleState.Phase.STRIP, "打倒层主进入净化时刻")
-	check(state.absorb_sin(), "拿起色欲")
-	check(state.collection.size() == 1 and state.collection[0].id == "lust", "色欲进收藏")
-	check(state.phase == BattleState.Phase.DEBRIEF, "进入净化读白")
-	check(state.finish_debrief(), "读完即结束（层战无三问）")
-	check(state.phase == BattleState.Phase.ENDED, "层战结束")
+	check(state.outro_id == "l2_boss", "本场收尾演出＝l2_boss")
+	check(state.phases_id == "l2_boss" and state.boss_phase == 1, "三阶段派发：开局阶段 1（大炮拦截）")
+	_drive_l2_boss_victory(state)
+	check(state.phase == BattleState.Phase.ENDED, "打倒层主直入结束（不经 STRIP/PURIFY）")
+	check(_log_contains(logs, BattleConfig.TEXT_L2_TELEPORT_STRIKE), "三阶段链在案：传送破局")
+	check(_log_contains(logs, BattleConfig.TEXT_L2_WINDOW_MISS_1), "三阶段链在案：遏制窗口打偏")
+	check(_log_contains(logs, BattleConfig.TEXT_STAGE_WIN), "层主战胜利读白")
+	# 战斗中不落账：罪卡不经收下不入 collection；获赠的传送/权能是场内永久牌（kind=UTILITY，不入仓库）
+	var sin_count := 0
+	for card in state.collection:
+		if card.kind == CardData.Kind.SIN:
+			sin_count += 1
+	check(sin_count == 0, "战斗中不收下罪卡（收尾演出末统一落账）")
+	check(_find_card(state.collection, "teleport") >= 0 and _find_card(state.collection, "lazy_power") >= 0, "获赠卡为场内收藏（不泄漏进仓）")
+	# 对照：无 outro 的层主战（教程战）照旧走 STRIP 三阶段——由 teaching/debrief 用例覆盖；
+	# L3–7 层层主同由 test_boss_strip_flow_layer3 全链覆盖
+	check(LayerConfig.LAYER3_BOSS.get("outro", "") == "" and LayerConfig.LAYER2_BOSS.get("outro", "") == "l2_boss", "outro 键仅 L2 在场（L3–7 照旧）")
 	# 牌组里带罪卡：本场检定对象＝色欲，任务参数按 Lust 配置
 	var state2 := BattleState.new()
 	state2.start_story(["lust", "strike", "strike", "strike", "strike"], stage)
@@ -1780,7 +1808,7 @@ func test_teaching_battle_logic() -> void:
 	state.stage_card(greed_index)
 	check(state.staged_cost() == 4, "净化 1＋强欲魔弹 3＝4 单位")
 	check(state.commit_staged(), "清场")
-	check(state.sleep_immune and not state.pending_sleep, "净化：免疫并清掉待发睡意")
+	check(state.status_immune and not state.pending_sleep, "净化：免疫并清掉待发睡意")
 	check(_count_log(logs, BattleConfig.TEXT_CLEANSE_SLEEP) == 1, "净化挡下睡意读白")
 	check(_count_log(logs, "蜗牛群怪受到 5 点伤害。") == 3, "强欲魔弹 3＋沉睡追伤 2＝5 × 3")
 	check(state.phase == BattleState.Phase.ENDED and _count_log(logs, BattleConfig.TEXT_TEACHING_WIN) == 1, "全灭＝教学战结束")
@@ -1847,6 +1875,242 @@ func test_ambush_battle_logic() -> void:
 	check(state.phase == BattleState.Phase.ENDED, "全灭＝遭遇战结束")
 	check(_count_log(logs, BattleConfig.TEXT_AMBUSH_WIN) == 1, "胜利读白＝污染体散架")
 	check(not state.absorb_sin() and state.collection.is_empty(), "遭遇战不进净化段、无收藏")
+
+
+# —— L2 层主三阶段（design-round14）——
+
+# 数据面：三阶段常量、敌阵/敌牌组/赠卡/窗口参数与五张新卡
+func test_l2_phase_data() -> void:
+	print("[L2 层主三阶段数据：敌阵/敌牌组/赠卡/窗口参数/新卡（design-round14）]")
+	check(BattleConfig.L2_BOSS_PHASES == "l2_boss", "phases 标识＝l2_boss")
+	check(BattleConfig.L2_PHASE1_ENEMIES.size() == 3, "阶段 1 敌阵＝层主＋双大炮")
+	check(String(BattleConfig.L2_PHASE1_ENEMIES[0].get("kind", "")) == "boss" and int(BattleConfig.L2_PHASE1_ENEMIES[0].get("hp", 0)) == 24, "层主 24 血 kind=boss")
+	var cannons_inanimate := bool(BattleConfig.L2_PHASE1_ENEMIES[1].get("inanimate", false)) and bool(BattleConfig.L2_PHASE1_ENEMIES[2].get("inanimate", false))
+	check(cannons_inanimate and String(BattleConfig.L2_PHASE1_ENEMIES[1].get("kind", "")) == "cannon", "双大炮为无意识死物")
+	check(BattleConfig.L2_PHASE1_DECK.has("cannon_barrage") and BattleConfig.L2_PHASE1_DECK.has("desire_whisper"), "阶段 1 敌牌组＝弹幕＋低语")
+	check(BattleConfig.L2_PHASE2_DECK.has("puppet_attack") and BattleConfig.L2_PHASE2_DECK.has("desire_whisper") and BattleConfig.L2_PHASE2_HAND == 4, "阶段 2 敌牌组＝扑袭＋低语、手牌 4")
+	check(BattleConfig.L2_PUPPET_NAME == "玩偶" and BattleConfig.L2_PUPPET_COUNT == 3 and BattleConfig.L2_PUPPET_HP == 6, "玩偶 3 体 × 6 血")
+	check(BattleConfig.L2_GRANTED_CARDS == ["teleport", "lazy_power"], "赠卡表＝传送＋懒惰的权能")
+	check(BattleConfig.L2_TELEPORT_DAMAGE == 4 and BattleConfig.L2_WINDOW_MULTIPLIER == 2, "传送 4 伤・窗口 ×2")
+	check(BattleConfig.DESIRE_STACK_CAP == 4, "欲望上限 4 层")
+	check(String(LayerConfig.LAYER2_BOSS.get("phases", "")) == "l2_boss", "LAYER2_BOSS 带 phases 键")
+	var teleport := CardDB.get_card("teleport")
+	check(teleport != null and teleport.cost == 0 and teleport.permanent and teleport.kind == CardData.Kind.UTILITY, "传送：0 费・永久・功能")
+	var teleport_effect: Dictionary = teleport.effects[0]
+	check(String(teleport_effect.get("op", "")) == "teleport_strike", "传送 op＝teleport_strike")
+	var lazy := CardDB.get_card("lazy_power")
+	check(lazy != null and lazy.cost == 2 and lazy.permanent and lazy.kind == CardData.Kind.UTILITY, "懒惰的权能：2 费・永久・功能")
+	var lazy_effect: Dictionary = lazy.effects[0]
+	check(String(lazy_effect.get("op", "")) == "sweep_inanimate", "权能 op＝sweep_inanimate")
+	var whisper := CardDB.get_card("desire_whisper")
+	check(whisper != null and whisper.kind == CardData.Kind.ENEMY, "欲望低语为敌牌")
+	var whisper_ops := PackedStringArray()
+	if whisper != null:
+		for effect in whisper.effects:
+			whisper_ops.append(String(effect.get("op", "")))
+	check(whisper_ops.has("inflict_desire") and whisper_ops.has("deal_damage"), "低语含 1 伤＋inflict_desire")
+	for card_id in ["cannon_barrage", "puppet_attack"]:
+		var card := CardDB.get_card(card_id)
+		check(card != null and card.kind == CardData.Kind.ENEMY, card_id + " 为敌牌且可载入")
+
+
+# 三阶段全链：阶段 1 拦截 → 传送破局 → 玩偶军队 → 权能清场 → 窗口武装 → 敌回打偏 → ×2 击杀
+func test_l2_boss_phases() -> void:
+	print("[L2 层主三阶段全链：拦截→传送→玩偶→权能→窗口→击杀（design-round14）]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], LayerConfig.LAYER2_BOSS)
+	state.debug_force_plays = 0
+	check(state.phases_id == "l2_boss" and state.boss_phase == 1, "开局＝阶段 1（大炮拦截）")
+	check(state.enemies.size() == 3 and int(state.enemies[0]["hp"]) == 24, "敌阵＝阿斯莫德 24 血＋双大炮")
+	check(_find_card(state.hand, "teleport") >= 0, "开局赠送「传送」入手")
+	# 阶段 1：普通攻击全被拦截（敌阵不掉血）
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.commit_staged()
+	check(int(state.enemies[0]["hp"]) == 24 and int(state.enemies[1]["hp"]) == 6, "魔弹被拦截：层主/大炮均无伤")
+	check(_log_contains(logs, BattleConfig.TEXT_L2_INTERCEPT), "拦截读白")
+	check(state.phase == BattleState.Phase.PLAYER, "拦截回合结算完＝新玩家回合")
+	# 传送破局：4 伤直达本体 → 大炮散架 → 玩偶军队登场 → 赠权能
+	state.stage_card(_find_card(state.hand, "teleport"))
+	state.commit_staged()
+	check(int(state.enemies[0]["hp"]) == 20, "传送 4 伤（24→20）")
+	check(state.enemies.size() == 4 and String(state.enemies[1]["kind"]) == "puppet", "大炮移除、三玩偶登场")
+	check(state._alive_inanimate_count() == 3 and state.boss_phase == 2, "三玩偶皆死物、进入阶段 2")
+	check(_find_card(state.hand, "lazy_power") >= 0, "赠送「懒惰的权能」入手")
+	check(_log_contains(logs, BattleConfig.TEXT_L2_CANNONS_FALL) and _log_contains(logs, BattleConfig.TEXT_L2_PUPPETS_APPEAR), "破局读白链")
+	check(not state._window_armed and not state._window_active, "玩偶在场：窗口未武装")
+	# 权能清场 → 窗口武装；敌回钉死出 2 张也被 armed 分支拦下（打偏＝0 伤）
+	state.debug_force_plays = 2
+	var hp_before := state.player_hp
+	state.stage_card(_find_card(state.hand, "lazy_power"))
+	state.commit_staged()
+	check(state._alive_inanimate_count() == 0, "权能清空玩偶")
+	check(_log_contains(logs, BattleConfig.TEXT_L2_LAZY_SWEEP), "清场读白")
+	check(state._window_active and state.boss_phase == 3, "敌回打偏后窗口开启、boss_phase=3")
+	check(state.player_hp == hp_before, "打偏回合 0 伤（敌方整批被拦）")
+	check(_log_contains(logs, BattleConfig.TEXT_L2_WINDOW_MISS_1) and _log_contains(logs, BattleConfig.TEXT_L2_WINDOW_MISS_2), "打偏读白两条")
+	check(state.phase == BattleState.Phase.PLAYER, "新玩家回合")
+	# 窗口期：魔弹 2 伤×2＝4
+	hp_before = int(state.enemies[0]["hp"])
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.commit_staged()
+	check(int(state.enemies[0]["hp"]) == hp_before - 4, "窗口期魔弹 2→4 伤")
+	# 驱动收尾：窗口期击杀＝本体死即胜（直入 ENDED）
+	_drive_l2_boss_victory(state)
+	check(state.phase == BattleState.Phase.ENDED and state._boss_dead(), "窗口期击杀＝结束")
+	check(_log_contains(logs, BattleConfig.TEXT_STAGE_WIN), "胜利读白")
+
+
+# 「传送」：开局赠送、丢失防呆补发、阶段 1 唯一破局、脱离阶段 1 降级为 4 伤
+func test_l2_teleport() -> void:
+	print("[传送：赠送/防呆补发/破局/降级（design-round14）]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	var deck: Array = []
+	for _i in 10:
+		deck.append("strike")
+	state.start_story(deck, LayerConfig.LAYER2_BOSS)
+	state.debug_force_plays = 0
+	check(_find_card(state.hand, "teleport") >= 0, "开局赠送传送入手")
+	check(_count_log(logs, BattleConfig.TEXT_L2_TELEPORT_GRANT) == 1, "赠送读白一次")
+	# 丢弃传送 → 回合开始防呆补发（阶段 1 无传送＝无法破局的死局防线）
+	check(state.discard_from_hand(_find_card(state.hand, "teleport")), "丢弃手上的传送")
+	state.end_turn()
+	check(_find_card(state.hand, "teleport") >= 0, "回合开始补发传送")
+	check(_count_log(logs, BattleConfig.TEXT_L2_TELEPORT_GRANT) == 2, "补发读白再出一次")
+	# 补发的传送照常破局
+	state.stage_card(_find_card(state.hand, "teleport"))
+	state.commit_staged()
+	check(state.boss_phase == 2 and int(state.enemies[0]["hp"]) == 20, "补发传送照常破局（24→20）")
+	# 阶段 2 再打传送：降级为普通 4 伤（不再换牌组/清大炮）
+	var hp_before := int(state.enemies[0]["hp"])
+	var inanimate_before := state._alive_inanimate_count()
+	state._apply_effect({"op": "teleport_strike", "amount": 4}, "传送")
+	check(int(state.enemies[0]["hp"]) == hp_before - 4 and state._alive_inanimate_count() == inanimate_before, "阶段 2 传送降级：只打本体 4 伤")
+
+
+# 遏制窗口：玩偶清空才武装；敌回打偏（零出牌不伤人）开启；开启后伤害×2、敌方不再反击
+func test_l2_window_mechanics() -> void:
+	print("[遏制窗口：武装条件/打偏开启/伤害翻倍/不再反击（design-round14）]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], LayerConfig.LAYER2_BOSS)
+	state.debug_force_plays = 0
+	state.stage_card(_find_card(state.hand, "teleport"))
+	state.commit_staged()
+	check(state.boss_phase == 2 and state._alive_inanimate_count() == 3, "直达阶段 2：三玩偶在场")
+	check(not state._window_armed, "玩偶在场：窗口不武装")
+	state.enemies[1]["hp"] = 0
+	state.enemies[2]["hp"] = 0
+	state._check_phase3_window()
+	check(not state._window_armed, "残留 1 只玩偶：仍不武装")
+	state.enemies[3]["hp"] = 0
+	state._check_phase3_window()
+	check(state._window_armed, "玩偶全清：窗口武装")
+	var boss_hp := int(state.enemies[0]["hp"])
+	state._apply_effect({"op": "deal_damage", "amount": 2}, "测试")
+	check(int(state.enemies[0]["hp"]) == boss_hp - 2, "武装未开启：攻击不翻倍")
+	# 敌回：armed→打偏开启（钉死敌方出 2 张——窗口拦下＝0 伤、零出牌、读白两条）
+	state.debug_force_plays = 2
+	var hp_before := state.player_hp
+	logs.clear()
+	state.end_turn()
+	check(state._window_active and state.boss_phase == 3, "敌回打偏：窗口开启、boss_phase=3")
+	check(state.player_hp == hp_before and not _log_contains(logs, "阿斯莫德打出"), "打偏回合零出牌、玩家 0 伤")
+	check(_count_log(logs, BattleConfig.TEXT_L2_WINDOW_MISS_1) == 1 and _count_log(logs, BattleConfig.TEXT_L2_WINDOW_MISS_2) == 1, "打偏读白两条")
+	# 开启后：×2；且敌方回合不再反击（仍钉死出 2 张，依旧 0 伤）
+	boss_hp = int(state.enemies[0]["hp"])
+	state._apply_effect({"op": "deal_damage", "amount": 2}, "测试")
+	check(int(state.enemies[0]["hp"]) == boss_hp - 4, "窗口期伤害×2（2→4）")
+	hp_before = state.player_hp
+	logs.clear()
+	state.end_turn()
+	check(state.player_hp == hp_before and _count_log(logs, BattleConfig.TEXT_L2_WINDOW_IDLE) == 1, "窗口期敌回不再反击（IDLE 读白）")
+	check(state._window_active and state.boss_phase == 3, "窗口持续到击杀（未关闭）")
+
+
+# 胜判特例：层主本体倒下即胜——玩偶未清也算（battle_state 清血段特例）
+func test_l2_win_special_case() -> void:
+	print("[胜判特例：本体倒下即胜、玩偶未清也算（design-round14）]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_story(["strike", "strike", "strike", "strike", "strike"], LayerConfig.LAYER2_BOSS)
+	state.debug_force_plays = 0
+	state.stage_card(_find_card(state.hand, "teleport"))
+	state.commit_staged()
+	check(state.boss_phase == 2 and state._alive_inanimate_count() == 3, "阶段 2：三玩偶存活")
+	# 直接打空本体（玩偶未清窗口不会开，这里绕过窗口用直伤构造特例）
+	state._apply_effect({"op": "deal_damage", "amount": 30}, "测试")
+	check(state._boss_dead() and state._alive_inanimate_count() == 3, "本体倒下、三玩偶全在")
+	check(state.phase == BattleState.Phase.PLAYER, "直接结算不触发胜判（胜判在整批结算后）")
+	state.stage_card(_find_card(state.hand, "strike"))
+	state.commit_staged()
+	check(state.phase == BattleState.Phase.ENDED, "整批结算后：本体死即胜")
+	check(state._alive_inanimate_count() >= 1, "胜时仍有玩偶存活（特例生效）")
+	check(_log_contains(logs, BattleConfig.TEXT_STAGE_WIN), "胜利读白")
+
+
+# 欲望状态：低语叠加/上限封顶/回合失血/净化清除＋本场免疫/失血判负
+func test_l2_desire_system() -> void:
+	print("[欲望状态：低语叠加/上限封顶/回合失血/净化免疫/失血判负（design-round14）]")
+	var logs: Array = []
+	var state := BattleState.new()
+	state.log_event.connect(func(text: String) -> void: logs.append(text))
+	state.start_story(["cleanse", "strike", "strike", "strike", "strike"], LayerConfig.LAYER2_BOSS)
+	state.debug_force_plays = 0
+	check(state.desire_stacks == 0 and not state.status_immune, "开局无欲望、无免疫")
+	# 钉死敌方手牌＝欲望低语×2 → 打出两张：1 伤×2＋欲望 2 层；回合开始再失血 2
+	state.enemy_hand.clear()
+	state.enemy_hand.append(CardDB.get_card("desire_whisper"))
+	state.enemy_hand.append(CardDB.get_card("desire_whisper"))
+	state.debug_force_plays = 2
+	logs.clear()
+	state.end_turn()
+	check(state.desire_stacks == 2 and _count_log(logs, "耳语贴了上来") == 2, "低语×2＝欲望 2 层")
+	check(state.phase == BattleState.Phase.PLAYER and state.player_hp == BattleConfig.PLAYER_MAX_HP - 2 - 2, "低语 1 伤×2＋回合失血 2＝-4")
+	check(_log_contains(logs, BattleConfig.TEXT_DESIRE_TICK % [2, BattleConfig.PLAYER_MAX_HP - 4]), "失血读白按层数")
+	# 上限封顶：低语×3 只到 4 层（第 3 张贴到上限＝封顶读白）
+	state.enemy_hand.clear()
+	for _i in 3:
+		state.enemy_hand.append(CardDB.get_card("desire_whisper"))
+	state.debug_force_plays = 3
+	state.player_hp = BattleConfig.PLAYER_MAX_HP
+	logs.clear()
+	state.end_turn()
+	check(state.desire_stacks == BattleConfig.DESIRE_STACK_CAP, "欲望封顶 4 层")
+	check(_count_log(logs, BattleConfig.TEXT_DESIRE_FULL % BattleConfig.DESIRE_STACK_CAP) == 1, "封顶读白")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 3 - 4, "低语 3 伤＋回合失血 4＝-7")
+	# 净化：清除全部层数＋本场免疫；免疫期间低语滑开（不叠层）
+	check(state.stage_card(_find_card(state.hand, "cleanse")), "摆出净化")
+	logs.clear()
+	state.commit_staged()
+	check(state.desire_stacks == 0 and state.status_immune, "净化清除欲望＋本场免疫")
+	check(_log_contains(logs, BattleConfig.TEXT_CLEANSE_DESIRE % BattleConfig.DESIRE_STACK_CAP), "清除读白按层数")
+	state.enemy_hand.clear()
+	state.enemy_hand.append(CardDB.get_card("desire_whisper"))
+	state.debug_force_plays = 1
+	state.player_hp = BattleConfig.PLAYER_MAX_HP
+	logs.clear()
+	state.end_turn()
+	check(state.desire_stacks == 0 and _log_contains(logs, BattleConfig.TEXT_DESIRE_IMMUNE % "欲望低语"), "免疫期间低语滑开（不叠层）")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "滑开的低语只剩 1 点直伤")
+	# 失血判负：血线低于层数＝倒下（换新局避开免疫）
+	var state2 := BattleState.new()
+	state2.log_event.connect(func(text: String) -> void: logs.append(text))
+	state2.start_story(["strike", "strike", "strike", "strike", "strike"], LayerConfig.LAYER2_BOSS)
+	state2.debug_force_plays = 2
+	state2.enemy_hand.clear()
+	state2.enemy_hand.append(CardDB.get_card("desire_whisper"))
+	state2.enemy_hand.append(CardDB.get_card("desire_whisper"))
+	state2.player_hp = 3
+	logs.clear()
+	state2.end_turn()
+	check(state2.phase == BattleState.Phase.DEFEAT, "失血到 0＝判负")
+	check(_log_contains(logs, BattleConfig.TEXT_DESIRE_TICK % [2, 0]) and _log_contains(logs, BattleConfig.TEXT_DEFEAT), "失血读白＋判负读白")
 
 
 func test_battle_scene_tutorial() -> void:
@@ -2086,6 +2350,58 @@ func test_ambush_battle_scene() -> void:
 	await process_frame
 
 
+func test_l2_boss_scene() -> void:
+	print("[L2 层主战场景：敌列表（本体＋大炮）／欲望·免疫状态行／拖传送破局／拖权能开窗／窗口清场]")
+	var scene: Variant = (load("res://scenes/battle.tscn") as PackedScene).instantiate()
+	scene.configure(BattleState.Mode.STORY, ["strike", "strike", "strike", "strike", "strike"], LayerConfig.LAYER2_BOSS)
+	var viewport := _attach_scene(scene)
+	await process_frame
+	var state: BattleState = scene.state
+	var hand_box := scene.get_node("%HandBox") as Control
+	var play_box := scene.get_node("%PlayBox") as HBoxContainer
+	var commit_button := scene.get_node("%CommitButton") as Button
+	var ended_calls: Array = []
+	scene.battle_ended.connect(func(practice: bool) -> void: ended_calls.append(practice))
+	state.debug_force_plays = 0
+	# 阶段 1 界面：本体＋两门大炮逐行血量、45 秒计时、Cost 6
+	check((scene.get_node("%EnemyNameLabel") as Label).text == "阿斯莫德", "对手显示阿斯莫德")
+	check((scene.get_node("%TurnTimerLabel") as Label).text == "剩余 45 秒", "层主战时限 45 秒")
+	_check_cost_label(scene, "Cost 6 / 6", "层主战 Cost 6 体系")
+	var enemy_list := scene.get_node_or_null("EnemyListLabel") as Label
+	check(enemy_list != null and enemy_list.visible, "多敌列表出现（本体＋大炮）")
+	check(enemy_list.text == "阿斯莫德　24 / 24\n大炮　6 / 6\n大炮　6 / 6", "列表逐行显示本体与大炮血量（实际：" + enemy_list.text + "）")
+	# 状态行：欲望层数＋负面免疫（直接改状态触发刷新，再复原）
+	state.desire_stacks = 2
+	state.status_immune = true
+	state.stats_changed.emit()
+	var block_label := scene.get_node("%PlayerBlockLabel") as Label
+	check("欲望 2 层" in block_label.text and "负面免疫" in block_label.text, "状态行显示欲望层数与负面免疫")
+	state.desire_stacks = 0
+	state.status_immune = false
+	state.stats_changed.emit()
+	check(not ("欲望" in block_label.text), "层数归零后状态行不残留")
+	# T1：拖「传送」打出 → 破局进阶段 2（敌列表换玩偶军队）
+	check(_drag_card_to(scene, _first_live_button(hand_box, "传送"), play_box), "拖传送进牌区")
+	check(state.staged_cost() == 0, "传送 0 费不占 Cost")
+	commit_button.pressed.emit()
+	check(state.boss_phase == 2, "传送破局进入阶段 2")
+	check(enemy_list.text == "阿斯莫德　20 / 24\n玩偶　6 / 6\n玩偶　6 / 6\n玩偶　6 / 6", "玩偶军队登场（实际：" + enemy_list.text + "）")
+	# T2：拖「懒惰的权能」清玩偶 → 敌回打偏 → 遏制窗口开启
+	check(_drag_card_to(scene, _first_live_button(hand_box, "懒惰的权能"), play_box), "拖权能进牌区（阶段 2 赠卡）")
+	commit_button.pressed.emit()
+	check(state._window_active and state.boss_phase == 3, "权能清场→敌回打偏→窗口开启")
+	check(state.player_hp == BattleConfig.PLAYER_MAX_HP, "打偏回玩家 0 伤")
+	# T3 起：窗口期拖魔弹收尾（本体死即胜，玩偶不必清）
+	_press_strikes_until_over(scene)
+	check(state.phase == BattleState.Phase.ENDED, "窗口内击破本体＝结束")
+	check(ended_calls == [false], "胜局上报 battle_ended(false)")
+	check(not (scene.get_node("%Overlay") as Control).visible, "胜局不进覆盖层")
+	check(scene.collected_sin_ids().is_empty(), "战斗中不产生罪卡收获")
+	check(state.collection.size() == 2 and _find_card(state.collection, "teleport") >= 0 and _find_card(state.collection, "lazy_power") >= 0, "两张赠卡进场内收藏（不泄漏进仓）")
+	viewport.queue_free()
+	await process_frame
+
+
 func test_prologue_page() -> void:
 	print("[初幕演出页：9 拍推进、名牌/立绘切换、末拍「迎战」、结束信号]")
 	var page := ProloguePage.new()
@@ -2217,13 +2533,71 @@ func test_story_beats_l2() -> void:
 	await process_frame
 
 
+func test_story_beats_l2_outro() -> void:
+	print("[第二幕收尾拍表：A 11 拍/B 7 拍字段・素材・关键句・末拍按钮；outro 派发与未知 id 回退（design-round13）]")
+	check(StoryBeats.L2_BOSS_OUTRO_A.size() == 11 and StoryBeats.L2_BOSS_OUTRO_B.size() == 7, "两表规模：A 11 拍／B 7 拍")
+	var fields_ok := true
+	var bgs_ok := true
+	var portraits_ok := true
+	var a_text := ""
+	var b_text := ""
+	for beats in [StoryBeats.L2_BOSS_OUTRO_A, StoryBeats.L2_BOSS_OUTRO_B]:
+		for beat in beats:
+			var text := String(beat.get("text", ""))
+			if text == "" or String(beat.get("button_label", "")) == "" or not (beat.get("bg_color") is Color):
+				fields_ok = false
+			var bg := String(beat.get("bg", ""))
+			if bg == "" or not FileAccess.file_exists(StoryBeats.BG_DIR + bg + ".png"):
+				bgs_ok = false
+			var portrait := String(beat.get("portrait", ""))
+			if portrait != "" and not FileAccess.file_exists(StoryBeats.BG_DIR + portrait + ".png"):
+				portraits_ok = false
+	for beat in StoryBeats.L2_BOSS_OUTRO_A:
+		a_text += String(beat.get("text", "")) + "\n"
+	for beat in StoryBeats.L2_BOSS_OUTRO_B:
+		b_text += String(beat.get("text", "")) + "\n"
+	check(fields_ok, "每拍：文本/按钮/底色齐全")
+	check(bgs_ok, "每拍底图素材在场（复用 bg_castle）")
+	check(portraits_ok, "立绘引用素材在场（livia_corrupt/livia/figelie）")
+	check(a_text.contains("真拿你没办法") and a_text.contains("大炮") and a_text.contains("发射"), "A 段大炮段关键句")
+	check(a_text.contains("贝嘉，可以传送") and a_text.contains("传送，准备") and a_text.contains("把我传送到莉维娅身后"), "A 段传送破局关键句（菲戈蕾）")
+	check(a_text.contains("我生气了") and a_text.contains("躺下，等等，躺下？"), "A 段玩偶军队关键句（懒惰权能）")
+	check(a_text.contains("技高一筹") and a_text.contains("没打中我，为什么？"), "A 段故意打偏关键句")
+	check(a_text.contains("快动手吧") and a_text.contains("我不怕疼的"), "A 段末段：交付净化（快动手吧）")
+	check(String(StoryBeats.L2_BOSS_OUTRO_A[0].get("portrait", "")) == "livia_corrupt", "A 段首拍＝污染形态立绘")
+	check(String(StoryBeats.L2_BOSS_OUTRO_A[3].get("portrait", "")) == "figelie", "A 段第 4 拍＝菲戈蕾传送（立绘登场）")
+	check(String(StoryBeats.L2_BOSS_OUTRO_A[10].get("button_label", "")) == "动手", "A 段末拍按钮＝动手（收下仪式）")
+	check(b_text.contains("脑瓜崩") and b_text.contains("最后的一丝污染也被清除完毕"), "B 段脑瓜崩净化关键句")
+	check(b_text.contains("我们成功了") and b_text.contains("我们会爱你的"), "B 段哭泣戏关键句（成功/爱）")
+	check(String(StoryBeats.L2_BOSS_OUTRO_B[0].get("portrait", "")) == "livia_corrupt" and String(StoryBeats.L2_BOSS_OUTRO_B[1].get("portrait", "")) == "livia", "B 段立绘切换：污染形态→净化后")
+	var last_b: Dictionary = StoryBeats.L2_BOSS_OUTRO_B[StoryBeats.L2_BOSS_OUTRO_B.size() - 1]
+	check(String(last_b.get("text", "")) == "第二幕，完" and String(last_b.get("button_label", "")) == "继续", "B 段末拍：第二幕，完（继续）")
+	# outro 派发（design-round13）：l2_boss 命中 A→B 两表 / 未知 id 空表回退直接落账
+	check(StoryBeats.outro_beats("l2_boss") == [StoryBeats.L2_BOSS_OUTRO_A, StoryBeats.L2_BOSS_OUTRO_B], "outro 派发：l2_boss → A→B 两表")
+	check(StoryBeats.outro_beats("unknown_id").is_empty(), "未知 outro id → 空表（回退直接落账收尾）")
+	check(String(LayerConfig.LAYER2_BOSS.get("outro", "")) == "l2_boss", "L2 层主节点带 outro 键")
+	# 演出页换表参数化：传 A 表推进到末拍「动手」
+	var page := ProloguePage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	page.start(StoryBeats.L2_BOSS_OUTRO_A)
+	check((page._text_label as Label).text.contains("真拿你没办法"), "传表 start()＝收尾 A 段首拍（魔炮连射）")
+	for _i in StoryBeats.L2_BOSS_OUTRO_A.size() - 2:
+		(page._continue_button as Button).pressed.emit()
+	check((page._text_label as Label).text.contains("没打中我，为什么？") and (page._continue_button as Button).text == "继续", "A 段倒数第 2 拍＝故意打偏（仍「继续」）")
+	(page._continue_button as Button).pressed.emit()
+	check((page._continue_button as Button).text == "动手" and (page._text_label as Label).text.contains("快动手吧"), "A 段末拍＝「动手」按钮")
+	viewport.queue_free()
+	await process_frame
+
+
 func test_battle_scene_defeat() -> void:
 	print("[战斗场景·判负：覆盖层＋battle_lost，不发 battle_ended]")
 	var packed := load("res://scenes/battle.tscn") as PackedScene
 	if packed == null:
 		return
 	var scene: Variant = packed.instantiate()
-	scene.configure(BattleState.Mode.STORY, ["strike", "strike", "strike", "strike", "strike"], _pool_battle("粉雾歌者"))
+	scene.configure(BattleState.Mode.STORY, ["strike", "strike", "strike", "strike", "strike"], _pool_battle("雾中残响"))
 	var viewport := _attach_scene(scene)
 	await process_frame
 	var lost_calls: Array = []
@@ -2278,12 +2652,12 @@ func test_map_page() -> void:
 	layer8.pressed.emit()
 	check(page._toast.visible and page._toast.text.contains("待续"), "点待续层提示待续")
 	var fog := _deep_find_button(page, "事件·试衣镜")
-	var pol1 := _deep_find_button(page, "作战·粉雾歌者")
+	var pol1 := _deep_find_button(page, "作战·雾中残响")
 	var mirror := _deep_find_button(page, "事件·糖果摊")
 	check(fog != null and not fog.disabled, "第一列事件节点可选")
 	check(pol1 != null and not pol1.disabled, "同列作战节点也可选")
 	check(mirror != null and not mirror.disabled, "同列第三个节点可选")
-	var echo := _deep_find_button(page, "作战·糖丝傀儡")
+	var echo := _deep_find_button(page, "作战·橱窗巧偶")
 	check(echo != null and echo.disabled, "下一列节点未到不可点")
 	var boss_node := _deep_find_button(page, "层主战·阿斯莫德")
 	check(boss_node != null and boss_node.disabled, "层主战节点未到不可点")
@@ -2294,9 +2668,9 @@ func test_map_page() -> void:
 	await process_frame
 	var fog_after := _deep_find_button(page, "事件·试衣镜")
 	check(fog_after.text.contains("✓") and fog_after.disabled, "已走节点标 ✓ 不可再点")
-	var pol_after := _deep_find_button(page, "作战·粉雾歌者")
+	var pol_after := _deep_find_button(page, "作战·雾中残响")
 	check(pol_after.text.contains("✕") and pol_after.disabled, "同列未选标 ✕ 错失")
-	var echo_after := _deep_find_button(page, "作战·糖丝傀儡")
+	var echo_after := _deep_find_button(page, "作战·橱窗巧偶")
 	check(echo_after != null and not echo_after.disabled, "推进后第二列可选")
 	var candle_after := _deep_find_button(page, "事件·合唱席")
 	check(candle_after != null and not candle_after.disabled, "第二列事件节点可选")
@@ -2336,7 +2710,7 @@ func test_map_route_scroll() -> void:
 	check(scroll.vertical_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED, "纵向不滚动（只横向拉）")
 	check(scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO, "长线横向可滚（滚动条显示）")
 	# 点击首列节点（真实鼠标事件，非 pressed.emit）
-	var pol := _deep_find_button(page, "作战·粉雾歌者")
+	var pol := _deep_find_button(page, "作战·雾中残响")
 	check(pol != null, "首列作战节点在屏")
 	var center := pol.get_global_rect().get_center()
 	_push_mouse_button(viewport, center, true)
@@ -2423,7 +2797,7 @@ func test_event_effect_flow() -> void:
 	var viewport := _attach_scene(main)
 	await process_frame
 	main.run.tutorial_done = true
-	main.run.route = [[_pool_event("粉焰之墙")], [_pool_battle("糖丝傀儡")]]
+	main.run.route = [[_pool_event("粉焰之墙")], [_pool_battle("橱窗巧偶")]]
 	main.run.route_layer = main.run.current_layer
 	main._open_map()
 	var map_page := main.get_node("%MapPage") as Control
@@ -2457,15 +2831,15 @@ func test_event_effect_flow() -> void:
 	check(map_page.visible, "事件完成回地图")
 	check(main.run.pending_hp_delta == -1, "hp 修正落账（层内续航 −1）")
 	check(main.run.pending_block == 1, "格挡落账（下一战 +1）")
-	# 第二列·作战（糖丝傀儡）：带伤入场 19/20，开局格挡 +1 并在开战时消费
-	var echo := _deep_find_button(map_page, "作战·糖丝傀儡")
+	# 第二列·作战（橱窗巧偶）：带伤入场 19/20，开局格挡 +1 并在开战时消费
+	var echo := _deep_find_button(map_page, "作战·橱窗巧偶")
 	echo.pressed.emit()
 	confirm_primary.pressed.emit()
 	await process_frame
 	var battle_host := main.get_node("%BattleHost") as Control
 	check(battle_host.get_child_count() == 1, "进入战斗位")
 	var battle: Variant = battle_host.get_child(0)
-	check(battle.state.enemy_name == "糖丝傀儡", "第二列作战按节点")
+	check(battle.state.enemy_name == "橱窗巧偶", "第二列作战按节点")
 	check(battle.state.player_hp == BattleConfig.PLAYER_MAX_HP - 1, "带伤入场（你：19 / 20）")
 	check((battle.get_node("%PlayerHpLabel") as Label).text == "你：19 / 20", "入战 HUD 显示带伤入场")
 	check(battle.state.player_block == 1, "开局格挡 +1 已上手")
@@ -2586,7 +2960,7 @@ func test_event_buff_lifecycle() -> void:
 	var deck: Array = []
 	for i in BattleConfig.DECK_SIZE:
 		deck.append("strike")
-	state.start_story(deck, _pool_battle("糖丝傀儡"), BattleConfig.PLAYER_MAX_HP - 2, 1, 1)
+	state.start_story(deck, _pool_battle("橱窗巧偶"), BattleConfig.PLAYER_MAX_HP - 2, 1, 1)
 	check(state.player_hp == BattleConfig.PLAYER_MAX_HP - 2, "story 带伤入场")
 	check(state.player_block == 1, "story 开局格挡 1")
 	check(state.hand.size() == BattleConfig.HAND_SIZE + 1, "story 起手多抽 1")
@@ -3536,7 +3910,7 @@ func test_main_menu_practice_entry() -> void:
 
 
 func test_main_flow_layer2() -> void:
-	print("[第二层路线全流程：夹具选路（含死亡重掷）→ 层主战前演出 → 层主战 → 上行 → 地图（第 3 层解锁）]")
+	print("[第二层路线全流程：夹具选路（含死亡重掷）→ 层主战前演出 → 层主战 → 收尾演出 A/B → 上行 → 地图（第 3 层解锁）]")
 	var main: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	var viewport := _attach_scene(main)
 	var map_page := main.get_node("%MapPage") as Control
@@ -3577,8 +3951,8 @@ func test_main_flow_layer2() -> void:
 	(event_page._complete_button as Button).pressed.emit()
 	check(map_page.visible, "事件完成回地图")
 	check(main.run.column_index == 1, "选路推进到第二列")
-	# 第二列·作战（糖丝傀儡）→ 故意判负，验证死亡回层首重选
-	var echo := _deep_find_button(map_page, "作战·糖丝傀儡")
+	# 第二列·作战（橱窗巧偶）→ 故意判负，验证死亡回层首重选
+	var echo := _deep_find_button(map_page, "作战·橱窗巧偶")
 	check(echo != null and not echo.disabled, "第二列作战节点当前可点")
 	echo.pressed.emit()
 	check(overlay.visible, "作战节点也弹确认窗")
@@ -3588,7 +3962,7 @@ func test_main_flow_layer2() -> void:
 	check(battle_host.get_child_count() == 1, "第二列作战进入战斗位")
 	var lost_battle: Variant = battle_host.get_child(0)
 	check(lost_battle.state.mode == BattleState.Mode.STORY, "层战模式")
-	check(lost_battle.state.enemy_name == "糖丝傀儡" and lost_battle.state.enemy_max_hp == 18, "第二列作战按节点配置")
+	check(lost_battle.state.enemy_name == "橱窗巧偶" and lost_battle.state.enemy_max_hp == 18, "第二列作战按节点配置")
 	lost_battle.state.debug_force_plays = 5
 	var safety := 0
 	while lost_battle.state.phase == BattleState.Phase.PLAYER and safety < 20:
@@ -3601,11 +3975,11 @@ func test_main_flow_layer2() -> void:
 	check(map_page.visible, "判负回地图")
 	check(main.run.column_index == 0 and main.run.chosen.is_empty(), "死亡回层首＝选路重置")
 	check(_route_signature(main.run.current_columns()) != _route_signature(_fixture_route()), "死亡重掷＝重新生成新路线（rng 播种，可复现）")
-	# 重掷已断言；重新注入夹具，继续走固定节点（第一列·作战：粉雾歌者）
+	# 重掷已断言；重新注入夹具，继续走固定节点（第一列·作战：雾中残响）
 	main.run.route = _fixture_route()
 	main.run.route_layer = main.run.current_layer
 	main._open_map()
-	var pol := _deep_find_button(map_page, "作战·粉雾歌者")
+	var pol := _deep_find_button(map_page, "作战·雾中残响")
 	check(pol != null and not pol.disabled, "第一列作战节点当前可点")
 	pol.pressed.emit()
 	check(overlay.visible, "重掷后作战节点仍走确认窗")
@@ -3613,7 +3987,7 @@ func test_main_flow_layer2() -> void:
 	await process_frame
 	check(battle_host.get_child_count() == 1, "小怪战进入战斗位")
 	var battle: Variant = battle_host.get_child(0)
-	check(battle.state.enemy_name == "粉雾歌者" and battle.state.enemy_max_hp == 16, "小怪按节点配置")
+	check(battle.state.enemy_name == "雾中残响" and battle.state.enemy_max_hp == 16, "小怪按节点配置")
 	battle.state.debug_force_plays = 0
 	_press_strikes_until_over(battle)
 	check(battle.state.phase == BattleState.Phase.ENDED, "小怪战打完直接结束（不过净化）")
@@ -3651,17 +4025,29 @@ func test_main_flow_layer2() -> void:
 	check(boss_battle.state.sin_card_id == "lust", "本场收下的罪卡＝色欲")
 	check((boss_battle.get_node("%AbsorbButton") as Button).text == "拿起 色欲", "拿起按钮按本场罪卡")
 	boss_battle.state.debug_force_plays = 0
-	_press_strikes_until_over(boss_battle)
-	check(boss_battle.state.phase == BattleState.Phase.STRIP, "打倒层主进入净化时刻")
-	var boss_overlay := boss_battle.get_node("%Overlay") as Control
-	check(boss_overlay.visible, "净化覆盖层出现")
-	check((boss_battle.get_node("%StoryText") as Label).text.contains("粉色的裙摆"), "净化时刻读白按关卡")
-	(boss_battle.get_node("%AbsorbButton") as Button).pressed.emit()
-	check(boss_battle.state.phase == BattleState.Phase.DEBRIEF, "收下后进入净化读白")
-	check((boss_battle.get_node("%StoryText") as Label).text.contains("接住"), "净化读白按关卡")
-	check((boss_battle.get_node("%StoryText") as Label).text.contains("莉维娅") and (boss_battle.get_node("%StoryText") as Label).text.contains("找到我了"), "净化读白：人身名莉维娅＋第二幕回调（design-round11）")
-	(boss_battle.get_node("%ContinueButton") as Button).pressed.emit()
-	check(boss_battle.state.phase == BattleState.Phase.ENDED, "层战净化读完直接结束（无三问）")
+	_drive_l2_boss_victory(boss_battle.state)
+	check(boss_battle.state.phase == BattleState.Phase.ENDED, "打倒层主直入结束（design-round13：不过净化）")
+	var boss_sin_count := 0
+	for card in boss_battle.state.collection:
+		if card.kind == CardData.Kind.SIN:
+			boss_sin_count += 1
+	check(boss_sin_count == 0, "战斗中不收下罪卡（落账推迟到收尾演出末）")
+	await process_frame
+	check(battle_host.get_child_count() == 0, "层主战已释放")
+	# 收尾演出 A 段（design-round13）：战斗过程 11 拍 → 末拍「快动手吧」（按钮「动手」）
+	check(prologue_page.visible, "清血直入收尾演出（A 段）")
+	check(main.run.sin_cards.is_empty() and not main.run.companions.has("莉维娅"), "演出前不落账（收下/同行待演出末）")
+	check(prologue_text.text.contains("真拿你没办法"), "A 段首拍＝魔炮连射（走位躲避）")
+	for _i in StoryBeats.L2_BOSS_OUTRO_A.size() - 1:
+		prologue_button.pressed.emit()
+	check(prologue_text.text.contains("快动手吧") and prologue_button.text == "动手", "A 段末拍＝「快动手吧」／按钮动手（收下仪式）")
+	prologue_button.pressed.emit()
+	# 收尾演出 B 段：脑瓜崩净化 → 哭泣戏 →「第二幕，完」
+	check(prologue_text.text.contains("脑瓜崩"), "B 段首拍＝脑瓜崩净化")
+	for _i in StoryBeats.L2_BOSS_OUTRO_B.size() - 1:
+		prologue_button.pressed.emit()
+	check(prologue_text.text.contains("第二幕，完"), "B 段末拍＝第二幕，完")
+	prologue_button.pressed.emit()
 	await process_frame
 	check(transition_page.visible, "路线走完进入上行过渡页")
 	check((transition_page._read_text as Label).text.contains("莉维娅"), "上行读白在屏（净化后人身名）")
@@ -3697,11 +4083,11 @@ func test_confirm_deck_flow() -> void:
 	var confirm_title := main.get_node("%ConfirmTitle") as Label
 	var confirm_primary := main.get_node("%ConfirmPrimaryButton") as Button
 	var choose_deck := main.get_node("%ChooseDeckButton") as Button
-	var pol := _deep_find_button(map_page, "作战·粉雾歌者")
+	var pol := _deep_find_button(map_page, "作战·雾中残响")
 	check(pol != null and not pol.disabled, "第一列作战节点可点")
 	pol.pressed.emit()
 	check(overlay.visible, "弹确认窗")
-	check(confirm_title.text == "进入「作战·粉雾歌者」？", "标题＝进入「类型·名称」？")
+	check(confirm_title.text == "进入「作战·雾中残响」？", "标题＝进入「类型·名称」？")
 	check(choose_deck.text == "选择牌组", "副按钮＝选择牌组（无取消键）")
 	check(main.run.chosen.is_empty() and main.run.column_index == 0, "弹窗未落账")
 	# 选择牌组 → 组卡界面（练习站）
@@ -3731,16 +4117,16 @@ func test_confirm_deck_flow() -> void:
 	(main.get_node("%LeavePracticeButton") as Button).pressed.emit()
 	check(map_page.visible, "离开组卡回地图")
 	check(overlay.visible, "回地图重新弹出该节点确认窗")
-	check(confirm_title.text == "进入「作战·粉雾歌者」？", "重弹仍是原节点")
+	check(confirm_title.text == "进入「作战·雾中残响」？", "重弹仍是原节点")
 	# 确认 → 落账入战，用刚组的卡组
 	confirm_primary.pressed.emit()
 	check(not overlay.visible, "确认后弹窗关闭")
-	check(main.run.column_index == 1 and main.run.chosen == [1], "确认落账并推进（粉雾歌者＝列内下标 1）")
+	check(main.run.column_index == 1 and main.run.chosen == [1], "确认落账并推进（雾中残响＝列内下标 1）")
 	await process_frame
 	var battle_host := main.get_node("%BattleHost") as Control
 	check(battle_host.get_child_count() == 1, "进入战斗位")
 	var battle: Variant = battle_host.get_child(0)
-	check(battle.state.enemy_name == "粉雾歌者", "按节点配置对手")
+	check(battle.state.enemy_name == "雾中残响", "按节点配置对手")
 	check(battle.state.draw_pile.size() + battle.state.hand.size() == BattleConfig.DECK_SIZE, "用组卡界面组的 10 张卡组")
 	viewport.queue_free()
 	await process_frame
@@ -3913,7 +4299,7 @@ func test_main_flow_save_resume() -> void:
 	check(main3.run.column_index == 1 and main3.run.chosen == [0], "中途进度续到第二列")
 	var fog3 := _deep_find_button(map3, "事件·试衣镜")
 	check(fog3 != null and fog3.text.contains("✓"), "已走节点续档后标 ✓")
-	var echo3 := _deep_find_button(map3, "作战·糖丝傀儡")
+	var echo3 := _deep_find_button(map3, "作战·橱窗巧偶")
 	check(echo3 != null and not echo3.disabled, "第二列续档后可直接继续")
 	viewport3.queue_free()
 	await process_frame
