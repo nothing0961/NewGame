@@ -67,6 +67,9 @@ func _ready() -> void:
 			elif not run.l2_entry_done and run.current_layer == LayerConfig.TUTORIAL_LAYER + 1 and run.column_index == 0:
 				# 第二层入场补看（design-round12）：仅层初列未开走；更深/中段老档不补防错位
 				_show_l2_entry()
+			elif not run.act3_interlude_done and run.current_layer == LayerConfig.TUTORIAL_LAYER + 2 and run.column_index == 0:
+				# 第三幕幕间补看（design-round15）：仅第三层初列未开走；更深/中段老档不补防错位
+				_show_act3_interlude()
 			else:
 				_open_map()
 		else:
@@ -353,7 +356,30 @@ func _on_story_outro_finished() -> void:
 		run.collect_sin(sin_id)
 		pool.collect_sin(sin_id)
 		collected.append(sin_id)
-	_finish_story_stage(collected)
+	# 幕间接线（design-round15）：层尾收尾（outro 末拍）后 stage 带 interlude 键时——
+	# 落账＋结层先存盘（flag 未置），幕间看完再置 flag 并进过渡页；
+	# 幕间途中崩溃重进＝只补幕间不重打层主（方案 B）；flag 仅在幕间末拍置位。
+	var interlude_beats: Array = StoryBeats.interlude_beats(String(_current_stage.get("interlude", "")))
+	if interlude_beats.is_empty() or not run.is_route_finished():
+		_finish_story_stage(collected)
+		return
+	if not collected.is_empty():
+		run.add_companion(LayerConfig.companion_name(run.current_layer))
+	var completed_layer := run.current_layer
+	run.complete_layer()
+	SaveGame.save_progress(run, pool)
+	_show_performance(interlude_beats, _on_story_interlude_finished.bind(completed_layer))
+
+
+func _on_story_interlude_finished(completed_layer: int) -> void:
+	run.act3_interlude_done = true
+	SaveGame.save_progress(run, pool)
+	_show_transition(LayerConfig.transition_lines(completed_layer))
+
+
+# 第三幕幕间补看（design-round15）：仅 _ready 门控（layer==3 初列未开走）调用
+func _show_act3_interlude() -> void:
+	_show_performance(StoryBeats.ACT3_INTERLUDE, _on_story_interlude_finished.bind(run.current_layer - 1))
 
 
 func _on_battle_lost() -> void:

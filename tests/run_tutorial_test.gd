@@ -68,6 +68,7 @@ func _initialize() -> void:
 	await test_story_beats()
 	await test_story_beats_l2()
 	await test_story_beats_l2_outro()
+	await test_story_beats_l3_interlude()
 	await test_battle_scene_defeat()
 	await test_map_page()
 	await test_map_route_scroll()
@@ -89,6 +90,7 @@ func _initialize() -> void:
 	await test_main_flow_skip_practice()
 	await test_act2_gating()
 	await test_l2_entry_gating()
+	await test_interlude_gating()
 	await test_main_menu_practice_entry()
 	await test_main_flow_layer2()
 	await test_confirm_deck_flow()
@@ -1553,6 +1555,7 @@ func test_layer_bosses_complete() -> void:
 		if layer == 2:
 			check(String(boss.get("outro", "")) == "l2_boss", "第 2 层层主节点带 outro 键（收尾演出）")
 			check(String(boss.get("phases", "")) == "l2_boss", "第 2 层层主节点带 phases 键（三阶段机制，design-round14）")
+			check(String(boss.get("interlude", "")) == "act3", "第 2 层层主节点带 interlude 键（第三幕幕间，design-round15）")
 			check((boss.get("strip_lines", []) as Array).is_empty() and (boss.get("purify_lines", []) as Array).is_empty(), "第 2 层无 STRIP/PURIFY 占位读白")
 		else:
 			check(String(boss.get("phases", "")) == "", "第 %d 层层主无 phases 键（三阶段仅 L2）" % layer)
@@ -2587,6 +2590,83 @@ func test_story_beats_l2_outro() -> void:
 	check((page._text_label as Label).text.contains("没打中我，为什么？") and (page._continue_button as Button).text == "继续", "A 段倒数第 2 拍＝故意打偏（仍「继续」）")
 	(page._continue_button as Button).pressed.emit()
 	check((page._continue_button as Button).text == "动手" and (page._text_label as Label).text.contains("快动手吧"), "A 段末拍＝「动手」按钮")
+	viewport.queue_free()
+	await process_frame
+
+
+func test_story_beats_l3_interlude() -> void:
+	print("[第三幕幕间拍表：22 拍/12 闪回/素材・关键句・暗色闪回样式；interlude 派发（design-round15）]")
+	var beats: Array = StoryBeats.ACT3_INTERLUDE
+	check(beats.size() == 22, "幕间表规模＝22 拍")
+	var fields_ok := true
+	var flashback_count := 0
+	var flashback_clean := true
+	for beat in beats:
+		if String(beat.get("text", "")) == "" or String(beat.get("button_label", "")) == "" or not (beat.get("bg_color") is Color):
+			fields_ok = false
+		if bool(beat.get("flashback", false)):
+			flashback_count += 1
+			if String(beat.get("bg", "")) != "" or String(beat.get("portrait", "")) != "" or String(beat.get("speaker", "")) != "":
+				flashback_clean = false
+	check(fields_ok, "每拍：文本/按钮/底色齐全")
+	check(flashback_count == 12, "闪回拍数＝12")
+	check(flashback_clean, "闪回拍：不带底图/立绘/说话人（纯暗色叙事）")
+	check(bool(beats[3].get("flashback", false)) and not bool(beats[2].get("flashback", false)), "闪回边界：[2] 问答→[3] 闪回")
+	check(bool(beats[14].get("flashback", false)) and not bool(beats[15].get("flashback", false)), "闪回边界：[14] 闪回→[15] 回草地")
+	var bg_files_ok := true
+	var portraits_ok := true
+	for beat in beats:
+		if bool(beat.get("flashback", false)):
+			continue
+		var bg := String(beat.get("bg", ""))
+		if bg == "" or not FileAccess.file_exists(StoryBeats.BG_DIR + bg + ".png"):
+			bg_files_ok = false
+		var portrait := String(beat.get("portrait", ""))
+		if portrait != "" and not FileAccess.file_exists(StoryBeats.BG_DIR + portrait + ".png"):
+			portraits_ok = false
+	check(bg_files_ok, "非闪回拍底图素材在场（bg_castle/bg_grass_dusk/bg_castle_home）")
+	check(portraits_ok, "立绘引用素材在场（livia/figelie）")
+	check(String(beats[2].get("bg", "")) == "bg_castle", "开场底图＝城堡（美梦具象化）")
+	check(String(beats[15].get("bg", "")) == "bg_grass_dusk", "[15] 起＝黄昏草地")
+	check(String(beats[18].get("bg", "")) == "bg_castle_home", "[18] 起＝城堡内景（三室一厅）")
+	var all_text := ""
+	for beat in beats:
+		all_text += String(beat.get("text", "")) + "\n"
+	check(all_text.contains("请允许我重新加入你的队伍"), "开场：莉维娅重新入队关键句")
+	check(all_text.contains("优绩主义") and all_text.contains("心境有关"), "问答：场景＝被侵蚀心境的具象化")
+	check(all_text.contains("《诗经》") and all_text.contains("每天抽查"), "闪回开场：七岁/诗经/妈妈抽查")
+	check(all_text.contains("奇迹与魔法，友情与战斗"), "闪回：动画向往关键句")
+	check(all_text.contains("那个娃娃已经被我丢了"), "闪回：玩偶被丢关键句")
+	check(all_text.contains("做错事了就不许哭"), "闪回：妈妈训诫关键句")
+	check(all_text.contains("妈妈后来死了"), "闪回：母亲病逝关键句")
+	check(all_text.contains("永远约束住了") and all_text.contains("包括她自己。"), "闪回收束：约束与失我关键句")
+	check(all_text.contains("算不算朋友") and all_text.contains("好朋友！"), "草地：朋友宣言关键句")
+	check(all_text.contains("咸咸的"), "草地：菲戈蕾舔泪关键句")
+	check(all_text.contains("迈入了阳台门"), "末段：左右牵手迈入阳台门")
+	check(all_text.contains("妈妈的厨艺很好") and not all_text.contains("妈妈地厨艺"), "文字校正：妈妈的厨艺（原稿「地」已纠）")
+	check(all_text.contains("打算叫贝嘉起床") and not all_text.contains("打算叫莉维娅起床"), "文字校正：打算叫贝嘉起床（原稿笔误已纠）")
+	check(all_text.contains("豆大的眼泪") and not all_text.contains("豆滴大"), "文字校正：豆大的眼泪（原稿「豆滴大」已纠）")
+	var last: Dictionary = beats[beats.size() - 1]
+	check(String(last.get("button_label", "")) == "进入第三层" and String(last.get("portrait", "")) == "livia", "末拍：莉维娅立绘＋「进入第三层」")
+	check(StoryBeats.interlude_beats("act3") == StoryBeats.ACT3_INTERLUDE, "interlude 派发：act3 → ACT3_INTERLUDE")
+	check(StoryBeats.interlude_beats("unknown_id").is_empty(), "未知 interlude id → 空表（回退直接过渡）")
+	check(String(LayerConfig.LAYER2_BOSS.get("interlude", "")) == "act3", "L2 层主节点带 interlude 键")
+	# 演出页暗色闪回样式：室内拍原样 → 闪回拍压暗染冷 → 回草地褪去
+	var page := ProloguePage.new()
+	var viewport := _attach_scene(page)
+	await process_frame
+	page.start(StoryBeats.ACT3_INTERLUDE)
+	check((page._bg_rect as TextureRect).modulate == Color.WHITE and (page._portrait as TextureRect).modulate == Color.WHITE, "首拍（室内）无闪回染色")
+	for _i in 3:
+		(page._continue_button as Button).pressed.emit()
+	check((page._bg_rect as TextureRect).modulate == ProloguePage.FLASHBACK_TINT and (page._portrait as TextureRect).modulate == ProloguePage.FLASHBACK_TINT, "[3] 闪回拍：底图/立绘着暗色")
+	var dark := beats[3].get("bg_color") as Color
+	check((page._bg_fallback as ColorRect).color.is_equal_approx(dark.darkened(0.3)), "闪回底色＝bg_color 加深一档")
+	check((page._text_label as Label).text.contains("《诗经》"), "推进到 [3] 闪回首拍（诗经）")
+	for _i in 12:
+		(page._continue_button as Button).pressed.emit()
+	check((page._bg_rect as TextureRect).modulate == Color.WHITE, "[15] 回草地：褪去闪回染色")
+	check((page._continue_button as Button).text == "继续" and (page._text_label as Label).text.contains("请抬起头"), "[15] ＝草地收束拍")
 	viewport.queue_free()
 	await process_frame
 
@@ -3886,6 +3966,71 @@ func test_l2_entry_gating() -> void:
 	SaveGame.disabled = true
 
 
+func test_interlude_gating() -> void:
+	print("[第三幕幕间门控：仅缺标记档→补看幕间（不重打层主）→过渡页；重启直达；层中段旧档不补看（design-round15）]")
+	var path := "user://save_test_interlude.json"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.disabled = false
+	SaveGame.save_path = path
+	# 一：教程＋第二幕＋入场已过、幕间未看、第三层初列未开走 → 启动补看幕间（不重打层主）
+	var run := RunState.new()
+	run.tutorial_done = true
+	run.act2_done = true
+	run.l2_entry_done = true
+	run.current_layer = LayerConfig.TUTORIAL_LAYER + 2
+	SaveGame.save_progress(run, CardPool.new())
+	var main1: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport1 := _attach_scene(main1)
+	await process_frame
+	var prologue1 := main1.get_node("%ProloguePage") as Control
+	var map1 := main1.get_node("%MapPage") as Control
+	var transition1 := main1.get_node("%TransitionPage") as Control
+	var battle_host1 := main1.get_node("%BattleHost") as Control
+	check(prologue1.visible and not map1.visible, "仅缺幕间标记：启动补看第三幕幕间")
+	check((prologue1._text_label as Label).text.contains("请允许我重新加入你的队伍"), "幕间首拍＝莉维娅重新入队")
+	check(battle_host1.get_child_count() == 0, "补看幕间不重打层主")
+	check(main1.run.current_layer == LayerConfig.TUTORIAL_LAYER + 2, "补看不动层号")
+	for _i in StoryBeats.ACT3_INTERLUDE.size() - 1:
+		(prologue1._continue_button as Button).pressed.emit()
+	check(prologue1.visible and not transition1.visible and not main1.run.act3_interlude_done, "幕间进行中：未置位、未进过渡页")
+	(prologue1._continue_button as Button).pressed.emit()
+	check(main1.run.act3_interlude_done, "幕间看完置位")
+	check(bool(SaveGame.load_progress().get("act3_interlude_done", false)), "act3_interlude_done 落盘")
+	check(transition1.visible, "幕间看完进上行过渡页（第 2 层读白）")
+	check((transition1._read_text as Label).text.contains("莉维娅"), "过渡读白在屏")
+	_first_live_button(transition1, "继续").pressed.emit()
+	check(map1.visible and main1.run.current_layer == LayerConfig.TUTORIAL_LAYER + 2, "过渡后落地图（第三层）")
+	viewport1.queue_free()
+	await process_frame
+	# 二：重启直达地图（读档还原 act3_interlude_done）
+	var main2: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport2 := _attach_scene(main2)
+	await process_frame
+	check((main2.get_node("%MapPage") as Control).visible and not (main2.get_node("%ProloguePage") as Control).visible, "重启直达地图不重看幕间")
+	check(main2.run.act3_interlude_done, "读档还原 act3_interlude_done")
+	viewport2.queue_free()
+	await process_frame
+	# 三：旧档（无幕间标记键）已在第三层中段 → 不补看（防路线错位）
+	var legacy := RunState.new()
+	legacy.tutorial_done = true
+	legacy.act2_done = true
+	legacy.l2_entry_done = true
+	legacy.current_layer = LayerConfig.TUTORIAL_LAYER + 2
+	legacy.column_index = 1
+	legacy.chosen.append(0)
+	SaveGame.save_progress(legacy, CardPool.new())
+	var main3: Variant = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var viewport3 := _attach_scene(main3)
+	await process_frame
+	check((main3.get_node("%MapPage") as Control).visible and not (main3.get_node("%ProloguePage") as Control).visible, "层中段旧档不补看幕间（直接地图）")
+	check(not main3.run.act3_interlude_done, "未补看：act3_interlude_done 保持 false")
+	viewport3.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	SaveGame.save_path = SaveGame.DEFAULT_SAVE_PATH
+	SaveGame.disabled = true
+
+
 func test_main_menu_practice_entry() -> void:
 	print("[主菜单练习站入口：标题页按钮直开练习站 → 离开回主菜单]")
 	var menu: Variant = (load("res://scenes/main_menu.tscn") as PackedScene).instantiate()
@@ -4047,8 +4192,21 @@ func test_main_flow_layer2() -> void:
 	for _i in StoryBeats.L2_BOSS_OUTRO_B.size() - 1:
 		prologue_button.pressed.emit()
 	check(prologue_text.text.contains("第二幕，完"), "B 段末拍＝第二幕，完")
+	check(not main.run.act3_interlude_done, "收尾末拍前幕间标记未置位")
 	prologue_button.pressed.emit()
 	await process_frame
+	# 幕间接线（design-round15・方案 B）：末拍先落账结层存盘 → 直入幕间演出（flag 未置→崩档只补幕间不重打层主）
+	check(prologue_page.visible and not transition_page.visible, "收尾末拍直入幕间演出（未先到过渡页）")
+	check(prologue_text.text.contains("请允许我重新加入你的队伍"), "幕间首拍＝莉维娅重新入队")
+	check(main.run.current_layer == 3 and main.run.column_index == 0, "幕间开场即已结层上行（方案 B）")
+	check(main.run.sin_cards == ["lust"] and main.run.companions.has("莉维娅") and main.pool.owned_count("lust") == 1, "落账已在幕间前完成（收下＋同行＋入仓库）")
+	check(not main.run.act3_interlude_done, "幕间进行中标记仍未置位（崩档只补幕间）")
+	for _i in StoryBeats.ACT3_INTERLUDE.size() - 1:
+		prologue_button.pressed.emit()
+	check(prologue_text.text.contains("迈入了阳台门") and prologue_button.text == "进入第三层", "幕间末拍＝牵手迈入阳台门／按钮「进入第三层」")
+	prologue_button.pressed.emit()
+	await process_frame
+	check(main.run.act3_interlude_done, "幕间末拍后标记置位")
 	check(transition_page.visible, "路线走完进入上行过渡页")
 	check((transition_page._read_text as Label).text.contains("莉维娅"), "上行读白在屏（净化后人身名）")
 	_first_live_button(transition_page, "继续").pressed.emit()
@@ -4192,6 +4350,7 @@ func test_save_roundtrip() -> void:
 	run.apply_outcome({"block": 2, "draw": 1})
 	run.act2_done = true
 	run.l2_entry_done = true
+	run.act3_interlude_done = true
 	var pool := CardPool.new()
 	pool.collect_sin("lust")
 	pool.add_to_deck("strike")
@@ -4213,18 +4372,21 @@ func test_save_roundtrip() -> void:
 	check(run2.pending_block == 2 and run2.pending_draw == 1, "下一战轻增益还原")
 	check(run2.act2_done, "第二幕标记还原")
 	check(run2.l2_entry_done, "第二层入场标记还原")
-	# 旧档缺 pending 系列/act2_done/l2_entry_done 键：缺省 0/false（VERSION 2 加键向后兼容）
+	check(run2.act3_interlude_done, "第三幕幕间标记还原")
+	# 旧档缺 pending 系列/act2_done/l2_entry_done/act3_interlude_done 键：缺省 0/false（VERSION 2 加键向后兼容）
 	var legacy: Dictionary = data.duplicate(true)
 	legacy.erase("pending_hp_delta")
 	legacy.erase("pending_block")
 	legacy.erase("pending_draw")
 	legacy.erase("act2_done")
 	legacy.erase("l2_entry_done")
+	legacy.erase("act3_interlude_done")
 	var run3 := RunState.new()
 	SaveGame.apply_progress(legacy, run3, CardPool.new())
 	check(run3.pending_hp_delta == 0 and run3.pending_block == 0 and run3.pending_draw == 0, "旧档缺 pending 键默认 0")
 	check(not run3.act2_done, "旧档缺 act2_done 默认 false（补看一次第二幕）")
 	check(not run3.l2_entry_done, "旧档缺 l2_entry_done 默认 false（补看一次入场）")
+	check(not run3.act3_interlude_done, "旧档缺 act3_interlude_done 默认 false（补看一次幕间）")
 	var battle_node: Dictionary = run2.route[0][1]
 	check(typeof(battle_node.get("enemy_hp")) == TYPE_INT, "节点血量回读为 int（JSON float 已归一）")
 	var enemy_deck: Dictionary = battle_node.get("enemy_deck", {})

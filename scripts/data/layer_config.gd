@@ -242,6 +242,9 @@ const LAYER2_BOSS := {
 	# 层主战收尾演出（design-round13）：清血后不经 STRIP/PURIFY，直入 OUTRO_A/B 拍表
 	# （main_flow._on_battle_ended 派发；末拍落账＝收下罪卡＋莉维娅同行）
 	"outro": "l2_boss",
+	# 第三幕开头幕间（design-round15）：outro 末拍落账结层存盘后接演，末拍进 L3 过渡页
+	# （main_flow._on_story_outro_finished 派发；补看门控见 _ready）
+	"interlude": "act3",
 }
 
 # 层完成后的上行过渡读白（同行层主；净化后＝人身莉维娅）

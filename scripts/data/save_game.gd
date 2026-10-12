@@ -21,6 +21,7 @@ static func save_progress(run: RunState, pool: CardPool) -> void:
 		"tutorial_done": run.tutorial_done,
 		"act2_done": run.act2_done,
 		"l2_entry_done": run.l2_entry_done,
+		"act3_interlude_done": run.act3_interlude_done,
 		"current_layer": run.current_layer,
 		"column_index": run.column_index,
 		"chosen": run.chosen,
@@ -78,6 +79,8 @@ static func apply_progress(data: Dictionary, run: RunState, pool: CardPool) -> v
 	run.act2_done = bool(data.get("act2_done", false))
 	# 旧档无此键：缺省 false＝补看一场 L2 入场（仅当层初列未开走，见 main_flow._ready）
 	run.l2_entry_done = bool(data.get("l2_entry_done", false))
+	# 旧档无此键：缺省 false＝补看第三幕幕间（仅当 layer==3 初列未开走，见 main_flow._ready）
+	run.act3_interlude_done = bool(data.get("act3_interlude_done", false))
 	if data.has("pool_owned"):
 		var owned := {}
 		var raw: Variant = data["pool_owned"]

@@ -9,6 +9,8 @@ signal finished()
 
 const PORTRAIT_WIDTH := 420.0
 const SPEAKER_COLOR := Color(1.0, 0.87, 0.55, 1.0)
+# 暗色闪回样式（design-round15）：flashback 拍将底图/立绘压暗染冷色、纯色底再加深一档
+const FLASHBACK_TINT := Color(0.44, 0.42, 0.56, 1.0)
 
 var _bg_fallback: ColorRect
 var _bg_rect: TextureRect
@@ -118,7 +120,12 @@ func _on_continue_pressed() -> void:
 
 func _refresh() -> void:
 	var beat: Dictionary = _beats[_beat_index]
+	var flashback := bool(beat.get("flashback", false))
 	_bg_fallback.color = beat.get("bg_color", Color(0.07, 0.06, 0.1, 1.0))
+	if flashback:
+		_bg_fallback.color = _bg_fallback.color.darkened(0.3)
+	_bg_rect.modulate = FLASHBACK_TINT if flashback else Color.WHITE
+	_portrait.modulate = FLASHBACK_TINT if flashback else Color.WHITE
 	_apply_texture(_bg_rect, String(beat.get("bg", "")))
 	_apply_texture(_portrait, String(beat.get("portrait", "")))
 	var speaker := String(beat.get("speaker", ""))
